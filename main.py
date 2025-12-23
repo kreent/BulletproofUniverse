@@ -129,32 +129,47 @@ def get_bulletproof_universe():
     tickers = set()
     print("🌍 Generando Universo...")
 
-    # Intento 1: Datasets de GitHub (Más estable que Wikipedia)
+    # Intento 1: GitHub API (más confiable que raw)
     try:
-        url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-        df = pd.read_csv(url_sp500, timeout=30)
+        # Usando GitHub API en lugar de raw.githubusercontent.com
+        url_sp500 = "https://api.github.com/repos/datasets/s-and-p-500-companies/contents/data/constituents.csv"
+        headers = {'Accept': 'application/vnd.github.v3.raw'}
+        r = requests.get(url_sp500, headers=headers, timeout=30)
+        r.raise_for_status()
+        from io import StringIO
+        df = pd.read_csv(StringIO(r.text))
         tickers.update(df['Symbol'].tolist())
-        print(f"   -> S&P 500 cargado desde GitHub ({len(tickers)})")
+        print(f"   -> S&P 500 cargado desde GitHub API ({len(tickers)})")
     except Exception as e:
-        print(f"   ⚠️ Fallo GitHub S&P 500.")
+        print(f"   ⚠️ Fallo GitHub S&P 500: {str(e)}")
+        
+        # Fallback: Intentar con raw.githubusercontent.com
+        try:
+            url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+            df = pd.read_csv(url_sp500, timeout=30)
+            tickers.update(df['Symbol'].tolist())
+            print(f"   -> S&P 500 cargado desde GitHub raw ({len(tickers)})")
+        except Exception as e2:
+            print(f"   ⚠️ Fallo GitHub raw: {str(e2)}")
 
-    # Intento 2: Nasdaq 100 (GitHub raw)
+    # Intento 2: Nasdaq 100
     try:
-        url_ndx = "https://raw.githubusercontent.com/nasdaq-100/nasdaq-100-symbols/master/nasdaq-100-symbols.csv"
-        # A veces viene sin header o con nombres distintos, intentamos robustez
-        r = requests.get(url_ndx, timeout=30)
-        text = r.text
-        lines = text.split('\n')
-        # Limpieza básica
-        nasdaq_ticks = [x.split(',')[0].strip() for x in lines if x and 'Symbol' not in x]
-        tickers.update(nasdaq_ticks)
-        print(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
+        url_ndx = "https://api.github.com/repos/nasdaq-100/nasdaq-100-symbols/contents/nasdaq-100-symbols.csv"
+        headers = {'Accept': 'application/vnd.github.v3.raw'}
+        r = requests.get(url_ndx, headers=headers, timeout=30)
+        if r.status_code == 200:
+            text = r.text
+            lines = text.split('\n')
+            nasdaq_ticks = [x.split(',')[0].strip() for x in lines if x and 'Symbol' not in x]
+            tickers.update(nasdaq_ticks)
+            print(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
     except Exception as e:
-        print(f"   ⚠️ Fallo GitHub Nasdaq.")
+        print(f"   ⚠️ Fallo GitHub Nasdaq: {str(e)}")
 
-    # Intento 3: Lista de Respaldo MANUAL (Si todo falla, usamos esto)
-    # 80 empresas variadas para asegurar resultados
+    # Intento 3: Lista de Respaldo MANUAL COMPLETA
+    # Lista actualizada con TODOS los tickers que aparecen en Colab
     BACKUP_LIST = [
+        # Originales (90 tickers)
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
         'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
         'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
@@ -163,14 +178,47 @@ def get_bulletproof_universe():
         'VZ', 'UPS', 'PM', 'NEE', 'RTX', 'MS', 'HON', 'AMGN', 'UNP', 'PFE',
         'LOW', 'SPGI', 'CAT', 'IBM', 'AMAT', 'DE', 'GS', 'GE', 'LMT', 'PLD',
         'BLK', 'SYK', 'T', 'ISRG', 'BKNG', 'ELV', 'MDT', 'TJX', 'ADI', 'NOW',
-        'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI'
+        'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI',
+        # Agregados - Los que salen en Colab pero faltaban
+        'MET', 'AMP', 'KMB', 'FCX', 'CLX', 'IT', 'BIIB', 'CL', 'ZBRA', 'WSM',
+        'MKTX', 'LII', 'FDS', 'RL', 'HAS',
+        # Más del S&P 500 para completar
+        'GOOG', 'BRK-A', 'AVGO', 'TSLA', 'JPM', 'UNH', 'LLY', 'XOM', 'V', 'PG',
+        'JNJ', 'MA', 'NVDA', 'HD', 'ABBV', 'MRK', 'COST', 'CVX', 'ADBE', 'PEP',
+        'KO', 'TMO', 'CSCO', 'ACN', 'MCD', 'ABT', 'NFLX', 'WFC', 'ORCL', 'CRM',
+        'DHR', 'TXN', 'AMD', 'CMCSA', 'QCOM', 'INTU', 'NKE', 'VZ', 'PM', 'UPS',
+        'NEE', 'RTX', 'HON', 'AMGN', 'LOW', 'SPGI', 'BMY', 'SBUX', 'BA', 'CAT',
+        'GS', 'IBM', 'AXP', 'ISRG', 'GILD', 'BLK', 'DE', 'ELV', 'MDT', 'SCHW',
+        'AMAT', 'SYK', 'PLD', 'LMT', 'ADI', 'BKNG', 'VRTX', 'TJX', 'REGN', 'ADP',
+        'MDLZ', 'CB', 'NOW', 'LRCX', 'MO', 'AMT', 'MMC', 'PYPL', 'PGR', 'SO',
+        'CI', 'DUK', 'ETN', 'BSX', 'SLB', 'ZTS', 'GE', 'EQIX', 'PNC', 'NOC',
+        'USB', 'TGT', 'ITW', 'REGN', 'BDX', 'MU', 'HCA', 'MS', 'WELL', 'KLAC',
+        'EOG', 'C', 'MMM', 'APH', 'FI', 'MCK', 'WM', 'PH', 'SNPS', 'CDNS',
+        'SHW', 'CMG', 'MAR', 'TDG', 'EMR', 'NSC', 'APD', 'MSI', 'NXPI', 'CARR',
+        'PSX', 'ADSK', 'CSX', 'CME', 'COP', 'MPC', 'TT', 'AJG', 'MCO', 'GM',
+        'AFL', 'ROP', 'PCAR', 'O', 'MCHP', 'SRE', 'HUM', 'ORLY', 'AZO', 'PAYX',
+        'D', 'ICE', 'MSCI', 'FTNT', 'KMB', 'ROST', 'ECL', 'AIG', 'TRV', 'CCI',
+        'JCI', 'TEL', 'CPRT', 'AEP', 'CL', 'HSY', 'GWW', 'PSA', 'MNST', 'KMI',
+        'EW', 'FAST', 'BK', 'CTAS', 'FCX', 'NEM', 'ALL', 'ODFL', 'DLR', 'EXC',
+        'SPG', 'CMI', 'IQV', 'KHC', 'CTVA', 'YUM', 'EA', 'XEL', 'GIS', 'VRSK',
+        'AME', 'DXCM', 'HLT', 'KVUE', 'PCG', 'DD', 'OTIS', 'RSG', 'IDXX', 'A',
+        'ANSS', 'VICI', 'VMC', 'MLM', 'BKR', 'KEYS', 'CTSH', 'IT', 'WMB', 'ROK',
+        'EXR', 'OKE', 'RMD', 'PPG', 'DOV', 'GEHC', 'AVB', 'BIIB', 'FICO', 'SYY',
+        'EIX', 'ED', 'CBRE', 'TROW', 'MTD', 'IRM', 'DAL', 'ALNY', 'HAL', 'ACGL',
+        'MPWR', 'WEC', 'WSM', 'XYL', 'FTV', 'GLW', 'WBD', 'FITB', 'IR', 'CHTR',
+        'CDW', 'HPQ', 'TSCO', 'AWK', 'DTE', 'ES', 'CAH', 'PPL', 'FDS', 'ETR',
+        'LH', 'GPN', 'CHD', 'EBAY', 'KEYS', 'RF', 'MTB', 'HPE', 'RL', 'ZBRA',
+        'TTWO', 'NTAP', 'STT', 'BALL', 'CLX', 'HAS', 'LUV', 'UAL', 'MKTX',
+        'LII', 'AMP', 'MET', 'ULTA', 'APTV', 'STE', 'DFS', 'CFG', 'INVH', 'HBAN'
     ]
 
     if len(tickers) < 50:
-        print("⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual.")
+        print(f"   ⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual ({len(BACKUP_LIST)} tickers).")
         tickers.update(BACKUP_LIST)
 
     final_list = list(set([t.replace('.', '-') for t in tickers]))
+    final_count = min(500, len(final_list))
+    print(f"   ✅ Total final: {final_count} tickers para analizar")
     return final_list[:500] # Limitamos a 500 para velocidad
 
 # ==========================================

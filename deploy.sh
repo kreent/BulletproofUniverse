@@ -135,6 +135,7 @@ gcloud run deploy $SERVICE_NAME \
     --min-instances 0 \
     --max-instances 10 \
     --set-env-vars GCS_BUCKET_NAME=$BUCKET_NAME \
+    --vpc-egress all-traffic \
     --quiet
 
 # ============================================================================
