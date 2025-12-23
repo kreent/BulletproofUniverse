@@ -111,6 +111,40 @@ def get_cached_results():
         traceback.print_exc()
         return None
 
+def get_full_cached_data():
+    """
+    Obtiene el objeto completo del caché (no solo results)
+    Usado por /refine para tener acceso a todos los datos del análisis
+    """
+    if not GCS_AVAILABLE:
+        return None
+    
+    try:
+        blob = bucket.blob(CACHE_FILE_NAME)
+        
+        if not blob.exists():
+            return None
+        
+        cache_content = blob.download_as_string()
+        data = json.loads(cache_content)
+        
+        if "results" not in data or "cached_at" not in data:
+            blob.delete()
+            return None
+        
+        cache_time = datetime.fromisoformat(data.get("cached_at", ""))
+        time_diff = datetime.now() - cache_time
+        
+        if time_diff < timedelta(hours=CACHE_TTL_HOURS):
+            # Retornar el objeto completo con metadata
+            return data["results"]
+        else:
+            blob.delete()
+            return None
+            
+    except Exception as e:
+        return None
+
 def save_to_cache(results):
     """Guarda resultados en Cloud Storage"""
     if not GCS_AVAILABLE:
@@ -666,14 +700,11 @@ def post_process_endpoint():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@app.route('/refine', methods=['POST', 'GET'])
+@app.route('/refine', methods=['GET'])
 def refine_endpoint():
     """
     Endpoint para Portfolio Manager Review
-    Ajusta crecimientos por sector y clasifica oportunidades
-    
-    GET: Refina los datos del último análisis en caché
-    POST: Refina los datos enviados en el body
+    Toma los datos del último análisis (caché o ejecuta nuevo) y los refina
     """
     if not PORTFOLIO_REFINER_AVAILABLE:
         return jsonify({
@@ -681,43 +712,73 @@ def refine_endpoint():
         }), 503
     
     try:
-        # Obtener datos
-        if request.method == 'POST':
-            data = request.get_json()
-            if not data:
-                return jsonify({"error": "No data provided"}), 400
-            log("🔄 Refinando datos recibidos vía POST...")
-        else:
-            # GET: Usar datos del último análisis
-            log("🔄 Refinando datos del último análisis...")
-            
-            # Intentar obtener del caché
-            cached = get_cached_results()
-            if cached:
-                data = cached
-            else:
-                # Si no hay caché, ejecutar análisis
-                log("⚠️  No hay caché, ejecutando análisis primero...")
-                data = run_analysis()
+        log("\n" + "="*60)
+        log("🧠 Portfolio Manager Review")
+        log("="*60)
         
-        # Refinar datos
-        log("🧠 Ejecutando Portfolio Manager Review...")
-        refiner = PortfolioRefiner(data)
+        # 1. Intentar obtener datos del caché primero
+        log("📂 Buscando datos en caché...")
+        cached_data = get_full_cached_data()
+        
+        if cached_data:
+            log("✅ Datos encontrados en caché")
+            data = cached_data
+        else:
+            # 2. Si no hay caché, ejecutar análisis nuevo
+            log("⚠️  No hay caché, ejecutando análisis nuevo...")
+            data = run_analysis()
+        
+        # 3. Verificar que tenemos resultados
+        if not data:
+            log("❌ No hay resultados para refinar")
+            return jsonify({
+                "error": "No analysis results available. Run /analyze first."
+            }), 404
+        
+        # 4. Verificar formato de datos
+        # Si data tiene 'results', lo usamos directamente
+        # Si data es una lista, necesitamos construir el objeto
+        if isinstance(data, list):
+            # Es solo la lista de results, construir objeto completo
+            data_obj = {'results': data}
+        elif isinstance(data, dict) and 'results' in data:
+            data_obj = data
+        else:
+            log("❌ Formato de datos inválido")
+            return jsonify({
+                "error": "Invalid data format"
+            }), 500
+        
+        # 5. Refinar los datos
+        candidates_count = len(data_obj.get('results', [])) if isinstance(data_obj.get('results'), list) else data_obj.get('candidates_count', 0)
+        log(f"🔍 Refinando {candidates_count} candidatos...")
+        
+        refiner = PortfolioRefiner(data_obj)
         refined_data = refiner.refine_all()
         
         if refined_data is None:
+            log("❌ Error en refinamiento")
             return jsonify({
-                "error": "No se pudieron refinar los datos"
+                "error": "Failed to refine data"
             }), 500
         
-        log("✅ Refinamiento completado")
+        log("✅ Refinamiento completado exitosamente")
+        log("="*60)
         
-        return jsonify({
+        # 6. Retornar respuesta
+        response_data = {
             "status": "success",
             "refined_data": refined_data,
             "refined_at": datetime.now().isoformat(),
-            "original_analysis_date": data.get('generated_at') if isinstance(data, dict) else None
-        })
+            "original_analysis": {
+                "generated_at": data_obj.get('generated_at'),
+                "total_analyzed": data_obj.get('total_analyzed'),
+                "candidates_count": data_obj.get('candidates_count'),
+                "from_cache": data_obj.get('from_cache', False)
+            }
+        }
+        
+        return jsonify(response_data)
         
     except Exception as e:
         log(f"❌ Error en refinamiento: {str(e)}")
