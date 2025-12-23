@@ -36,6 +36,14 @@ except ImportError:
     PORTFOLIO_REFINER_AVAILABLE = False
     print("⚠️  Portfolio Refiner no disponible")
 
+# Portfolio Tracker
+try:
+    from portfolio_tracker import PortfolioTracker
+    PORTFOLIO_TRACKER_AVAILABLE = True
+except ImportError:
+    PORTFOLIO_TRACKER_AVAILABLE = False
+    print("⚠️  Portfolio Tracker no disponible")
+
 # Silencio de logs ruidosos
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -531,7 +539,8 @@ def home():
         },
         "endpoints": {
             "/analyze": "Run analysis (with 24h cache + auto post-processing)",
-            "/refine": "POST - Portfolio Manager Review (adjust growth by sector)",
+            "/refine": "GET - Portfolio Manager Review (adjust growth by sector)",
+            "/follow": "POST - Portfolio Performance Tracker (analyze your portfolio)",
             "/post-process": "POST - Manual post-processing of results",
             "/cache-status": "Check cache status",
             "/clear-cache": "Clear cache manually",
@@ -540,6 +549,7 @@ def home():
         "features": {
             "auto_post_processing": POST_PROCESSOR_AVAILABLE,
             "portfolio_refinement": PORTFOLIO_REFINER_AVAILABLE,
+            "portfolio_tracking": PORTFOLIO_TRACKER_AVAILABLE,
             "sector_analysis": POST_PROCESSOR_AVAILABLE,
             "portfolio_metrics": POST_PROCESSOR_AVAILABLE,
             "smart_alerts": POST_PROCESSOR_AVAILABLE
@@ -662,7 +672,8 @@ def health():
         "cache_available": GCS_AVAILABLE,
         "post_processor_available": POST_PROCESSOR_AVAILABLE,
         "portfolio_refiner_available": PORTFOLIO_REFINER_AVAILABLE,
-        "version": "8.0 - DCF 2-Stage + Quality + Portfolio Manager"
+        "portfolio_tracker_available": PORTFOLIO_TRACKER_AVAILABLE,
+        "version": "8.0 - DCF 2-Stage + Quality + Portfolio Manager + Tracker"
     })
 
 @app.route('/post-process', methods=['POST'])
@@ -696,6 +707,96 @@ def post_process_endpoint():
         
     except Exception as e:
         log(f"❌ Error en post-procesamiento: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/follow', methods=['POST'])
+def follow_endpoint():
+    """
+    Endpoint para Portfolio Tracking
+    Recibe tickers, start_date e initial_capital
+    Retorna análisis de rendimiento del portfolio
+    
+    Body JSON:
+    {
+        "tickers": ["AAPL", "MSFT", "GOOGL"],
+        "start_date": "2024-01-01",
+        "initial_capital": 10000
+    }
+    """
+    if not PORTFOLIO_TRACKER_AVAILABLE:
+        return jsonify({
+            "error": "Portfolio Tracker not available"
+        }), 503
+    
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "error": "No data provided"
+            }), 400
+        
+        # Validar campos requeridos
+        required_fields = ['tickers', 'start_date', 'initial_capital']
+        missing = [f for f in required_fields if f not in data]
+        
+        if missing:
+            return jsonify({
+                "error": f"Missing required fields: {', '.join(missing)}"
+            }), 400
+        
+        tickers = data['tickers']
+        start_date = data['start_date']
+        initial_capital = data['initial_capital']
+        
+        # Validaciones
+        if not isinstance(tickers, list) or len(tickers) == 0:
+            return jsonify({
+                "error": "tickers must be a non-empty list"
+            }), 400
+        
+        if not isinstance(initial_capital, (int, float)) or initial_capital <= 0:
+            return jsonify({
+                "error": "initial_capital must be a positive number"
+            }), 400
+        
+        # Validar formato de fecha
+        try:
+            datetime.strptime(start_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({
+                "error": "start_date must be in YYYY-MM-DD format"
+            }), 400
+        
+        log("\n" + "="*60)
+        log("📊 Portfolio Tracking Request")
+        log("="*60)
+        log(f"Tickers: {', '.join(tickers)}")
+        log(f"Start Date: {start_date}")
+        log(f"Initial Capital: ${initial_capital:,.2f}")
+        
+        # Ejecutar tracking
+        tracker = PortfolioTracker(tickers, start_date, initial_capital)
+        result = tracker.analyze()
+        
+        if result is None:
+            return jsonify({
+                "error": "Failed to analyze portfolio. Check if tickers are valid and dates have available data."
+            }), 500
+        
+        log("✅ Portfolio tracking completado")
+        log("="*60)
+        
+        return jsonify({
+            "status": "success",
+            "analysis": result,
+            "analyzed_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        log(f"❌ Error en portfolio tracking: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

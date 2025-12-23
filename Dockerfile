@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY portfolio_refiner.py .
 COPY post_processor.py .
+COPY portfolio_tracker.py .
 
 # Exponer el puerto que usa Flask (8080 por defecto en Cloud Run)
 EXPOSE 8080
