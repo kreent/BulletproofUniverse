@@ -303,14 +303,14 @@ def analyze_stock_v7(ticker):
             sector = 'N/A'
 
         return {
-            'ticker': ticker,
-            'price': round(price, 2),
-            'sector': sector,
-            'roic': round(roic, 4),
-            'piotroski': piotroski,
-            'growth_est': round(growth_proxy, 4),
-            'intrinsic': round(intrinsic, 2) if intrinsic > 0 else None,
-            'mos': round(mos, 4) if mos != -0.99 else None
+            'Ticker': ticker,
+            'Price': round(price, 2),
+            'Sector': sector,
+            'ROIC': roic,
+            'Piotroski': piotroski,
+            'Growth_Est': growth_proxy,
+            'Intrinsic': intrinsic,
+            'MOS': mos
         }
 
     except Exception as e:
@@ -369,32 +369,28 @@ def run_analysis():
         return error_result
     
     df = pd.DataFrame(results)
-    df = df.sort_values(by='mos', ascending=False, na_position='last')
+    df = df.sort_values(by='MOS', ascending=False, na_position='last')
     
     # 4. Clasificación
-    buy_candidates = df[df['mos'] > 0.10].copy() if 'mos' in df.columns else pd.DataFrame()
-    fair_value = df[(df['mos'] > 0) & (df['mos'] <= 0.10)].copy() if 'mos' in df.columns else pd.DataFrame()
-    watchlist = df[df['mos'] <= 0].copy() if 'mos' in df.columns else pd.DataFrame()
+    buy_candidates = df[df['MOS'] > 0.10].copy() if 'MOS' in df.columns else pd.DataFrame()
+    fair_value = df[(df['MOS'] > 0) & (df['MOS'] <= 0.10)].copy() if 'MOS' in df.columns else pd.DataFrame()
+    watchlist = df[df['MOS'] <= 0].copy() if 'MOS' in df.columns else pd.DataFrame()
     
     # 5. Resultado final
     execution_time = round(time.time() - start_time, 2)
     
-    # Convertir a diccionarios
-    top_30 = df.head(30).replace({np.nan: None}).to_dict('records')
-    buy_list = buy_candidates.head(15).replace({np.nan: None}).to_dict('records')
-    fair_list = fair_value.head(10).replace({np.nan: None}).to_dict('records')
-    watch_list = watchlist.head(10).replace({np.nan: None}).to_dict('records')
+    # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
+    all_results = df.replace({np.nan: None}).to_dict('records')
     
     result = {
         "total_analyzed": len(tickers),
         "candidates_count": len(df),
-        "buy_candidates": len(buy_candidates),
-        "fair_value": len(fair_value),
-        "watchlist": len(watchlist),
-        "top_30": top_30,
-        "buy_zone": buy_list,
-        "fair_zone": fair_list,
-        "watch_zone": watch_list,
+        "results": all_results,  # TODOS los resultados, ordenados por MOS descendente
+        "summary": {
+            "buy_zone_count": len(buy_candidates),      # MOS > 10%
+            "fair_zone_count": len(fair_value),         # MOS 0-10%
+            "watch_zone_count": len(watchlist)          # MOS < 0%
+        },
         "generated_at": datetime.now().isoformat(),
         "cache_enabled": GCS_AVAILABLE,
         "from_cache": False,
