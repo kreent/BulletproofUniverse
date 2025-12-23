@@ -1,0 +1,11 @@
+yfinance
+tqdm
+requests
+lxml
+pandas
+numpy
+flask
+functions-framework
+google-cloud-storage
+gunicorn
+
