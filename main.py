@@ -126,32 +126,34 @@ def save_to_cache(results):
 # 1. UNIVERSO INDESTRUCTIBLE (CSV + HARDCODE)
 # ==========================================
 def get_bulletproof_universe():
-    """Obtiene el universo de acciones a analizar"""
     tickers = set()
-    log("🌍 Generando Universo...")
+    print("🌍 Generando Universo...")
 
     # Intento 1: Datasets de GitHub (Más estable que Wikipedia)
     try:
         url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-        df = pd.read_csv(url_sp500, timeout=15)
+        df = pd.read_csv(url_sp500, timeout=30)
         tickers.update(df['Symbol'].tolist())
-        log(f"   -> S&P 500 cargado desde GitHub ({len(tickers)} tickers)")
+        print(f"   -> S&P 500 cargado desde GitHub ({len(tickers)})")
     except Exception as e:
-        log(f"   ⚠️ Fallo GitHub S&P 500: {e}")
+        print(f"   ⚠️ Fallo GitHub S&P 500.")
 
     # Intento 2: Nasdaq 100 (GitHub raw)
     try:
-        url_ndx = "https://raw.githubusercontent.com/datasets/nasdaq-companies/master/data/nasdaq-listed-symbols.csv"
-        r = requests.get(url_ndx, timeout=15)
+        url_ndx = "https://raw.githubusercontent.com/nasdaq-100/nasdaq-100-symbols/master/nasdaq-100-symbols.csv"
+        # A veces viene sin header o con nombres distintos, intentamos robustez
+        r = requests.get(url_ndx, timeout=30)
         text = r.text
         lines = text.split('\n')
-        nasdaq_ticks = [x.split(',')[0].strip() for x in lines[1:] if x and len(x.split(',')[0].strip()) <= 5]
-        tickers.update(nasdaq_ticks[:100])  # Top 100
-        log(f"   -> Nasdaq cargado ({len(nasdaq_ticks[:100])} tickers)")
+        # Limpieza básica
+        nasdaq_ticks = [x.split(',')[0].strip() for x in lines if x and 'Symbol' not in x]
+        tickers.update(nasdaq_ticks)
+        print(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
     except Exception as e:
-        log(f"   ⚠️ Fallo GitHub Nasdaq: {e}")
+        print(f"   ⚠️ Fallo GitHub Nasdaq.")
 
     # Intento 3: Lista de Respaldo MANUAL (Si todo falla, usamos esto)
+    # 80 empresas variadas para asegurar resultados
     BACKUP_LIST = [
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
         'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
@@ -165,11 +167,11 @@ def get_bulletproof_universe():
     ]
 
     if len(tickers) < 50:
-        log("⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual.")
+        print("⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual.")
         tickers.update(BACKUP_LIST)
 
     final_list = list(set([t.replace('.', '-') for t in tickers]))
-    return final_list[:500]  # Limitamos a 500 para velocidad
+    return final_list[:500] # Limitamos a 500 para velocidad
 
 # ==========================================
 # 2. MOTOR DE BÚSQUEDA FUZZY (V5 Core)
@@ -337,24 +339,15 @@ def run_analysis():
     
     # 1. Obtener universo
     tickers = get_bulletproof_universe()
-    log(f"📊 Universo total: {len(tickers)} acciones")
+    log(f"🎯 Objetivo Real: Analizar {len(tickers)} empresas.")
     
     # 2. Análisis paralelo
-    log(f"🔍 Analizando con {CONFIG['MAX_WORKERS']} threads...")
     results = []
-    
     with ThreadPoolExecutor(max_workers=CONFIG['MAX_WORKERS']) as executor:
         futures = {executor.submit(analyze_stock_v7, t): t for t in tickers}
-        
-        completed = 0
         for future in as_completed(futures):
-            completed += 1
-            if completed % 50 == 0:
-                log(f"   Progreso: {completed}/{len(tickers)}")
-            
             r = future.result()
-            if r:
-                results.append(r)
+            if r: results.append(r)
     
     # 3. Procesar resultados
     if not results:
@@ -398,12 +391,13 @@ def run_analysis():
     }
     
     log("="*60)
-    log(f"✅ Análisis completado en {execution_time}s")
+    log(f"💎 RESULTADOS FINALES ({len(df)} encontrados):")
     log(f"📊 Total analizados: {len(tickers)}")
-    log(f"⭐ Candidatos encontrados: {len(df)}")
+    log(f"⭐ Candidatos finales: {len(df)}")
     log(f"   🟢 Zona de Compra (MOS > 10%): {len(buy_candidates)}")
     log(f"   🟡 Valor Justo (MOS 0-10%): {len(fair_value)}")
     log(f"   🔴 Watchlist (MOS < 0%): {len(watchlist)}")
+    log(f"⏱️  Tiempo de ejecución: {execution_time}s")
     log("="*60)
     
     # Guardar en caché
