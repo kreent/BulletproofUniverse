@@ -16,9 +16,25 @@ import json
 import os
 from datetime import datetime, timedelta
 from tqdm.auto import tqdm
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from google.cloud import storage
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Post-processor
+try:
+    from post_processor import ResultsPostProcessor
+    POST_PROCESSOR_AVAILABLE = True
+except ImportError:
+    POST_PROCESSOR_AVAILABLE = False
+    print("⚠️  Post-processor no disponible")
+
+# Portfolio Refiner
+try:
+    from portfolio_refiner import PortfolioRefiner
+    PORTFOLIO_REFINER_AVAILABLE = True
+except ImportError:
+    PORTFOLIO_REFINER_AVAILABLE = False
+    print("⚠️  Portfolio Refiner no disponible")
 
 # Silencio de logs ruidosos
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -480,10 +496,19 @@ def home():
             "discount_rate": f"{CONFIG['DISCOUNT_RATE']*100}%"
         },
         "endpoints": {
-            "/analyze": "Run analysis (with 24h cache)",
+            "/analyze": "Run analysis (with 24h cache + auto post-processing)",
+            "/refine": "POST - Portfolio Manager Review (adjust growth by sector)",
+            "/post-process": "POST - Manual post-processing of results",
             "/cache-status": "Check cache status",
             "/clear-cache": "Clear cache manually",
             "/health": "Health check"
+        },
+        "features": {
+            "auto_post_processing": POST_PROCESSOR_AVAILABLE,
+            "portfolio_refinement": PORTFOLIO_REFINER_AVAILABLE,
+            "sector_analysis": POST_PROCESSOR_AVAILABLE,
+            "portfolio_metrics": POST_PROCESSOR_AVAILABLE,
+            "smart_alerts": POST_PROCESSOR_AVAILABLE
         }
     })
 
@@ -496,6 +521,20 @@ def analyze():
         log("="*60)
         
         results = run_analysis()
+        
+        # Post-procesamiento automático
+        if POST_PROCESSOR_AVAILABLE and results.get('candidates_count', 0) > 0:
+            try:
+                log("🔄 Ejecutando post-procesamiento...")
+                processor = ResultsPostProcessor(results)
+                processed_data = processor.process_all()
+                
+                # Agregar datos procesados a la respuesta
+                results['post_processed'] = processed_data
+                log("✅ Post-procesamiento completado")
+            except Exception as e:
+                log(f"⚠️  Error en post-procesamiento: {e}")
+                results['post_processed'] = None
         
         response = app.response_class(
             response=json.dumps(results, default=str, allow_nan=False)
@@ -587,8 +626,104 @@ def health():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "cache_available": GCS_AVAILABLE,
-        "version": "8.0 - DCF 2-Stage + Quality"
+        "post_processor_available": POST_PROCESSOR_AVAILABLE,
+        "portfolio_refiner_available": PORTFOLIO_REFINER_AVAILABLE,
+        "version": "8.0 - DCF 2-Stage + Quality + Portfolio Manager"
     })
+
+@app.route('/post-process', methods=['POST'])
+def post_process_endpoint():
+    """
+    Endpoint para post-procesar resultados manualmente
+    Acepta JSON con los resultados del análisis
+    """
+    if not POST_PROCESSOR_AVAILABLE:
+        return jsonify({
+            "error": "Post-processor not available"
+        }), 503
+    
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "error": "No data provided"
+            }), 400
+        
+        log("🔄 Post-procesando datos recibidos...")
+        processor = ResultsPostProcessor(data)
+        processed_data = processor.process_all()
+        
+        return jsonify({
+            "status": "success",
+            "processed_data": processed_data,
+            "processed_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        log(f"❌ Error en post-procesamiento: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/refine', methods=['POST', 'GET'])
+def refine_endpoint():
+    """
+    Endpoint para Portfolio Manager Review
+    Ajusta crecimientos por sector y clasifica oportunidades
+    
+    GET: Refina los datos del último análisis en caché
+    POST: Refina los datos enviados en el body
+    """
+    if not PORTFOLIO_REFINER_AVAILABLE:
+        return jsonify({
+            "error": "Portfolio Refiner not available"
+        }), 503
+    
+    try:
+        # Obtener datos
+        if request.method == 'POST':
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+            log("🔄 Refinando datos recibidos vía POST...")
+        else:
+            # GET: Usar datos del último análisis
+            log("🔄 Refinando datos del último análisis...")
+            
+            # Intentar obtener del caché
+            cached = get_cached_results()
+            if cached:
+                data = cached
+            else:
+                # Si no hay caché, ejecutar análisis
+                log("⚠️  No hay caché, ejecutando análisis primero...")
+                data = run_analysis()
+        
+        # Refinar datos
+        log("🧠 Ejecutando Portfolio Manager Review...")
+        refiner = PortfolioRefiner(data)
+        refined_data = refiner.refine_all()
+        
+        if refined_data is None:
+            return jsonify({
+                "error": "No se pudieron refinar los datos"
+            }), 500
+        
+        log("✅ Refinamiento completado")
+        
+        return jsonify({
+            "status": "success",
+            "refined_data": refined_data,
+            "refined_at": datetime.now().isoformat(),
+            "original_analysis_date": data.get('generated_at') if isinstance(data, dict) else None
+        })
+        
+    except Exception as e:
+        log(f"❌ Error en refinamiento: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
