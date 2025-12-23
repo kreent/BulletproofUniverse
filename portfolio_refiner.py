@@ -1,19 +1,25 @@
 """
 portfolio_refiner.py - Portfolio Manager Review
-Refina los resultados del análisis aplicando ajustes realistas por sector
+Script EXACTO del segundo análisis proporcionado
 """
 
 import pandas as pd
 import numpy as np
 import json
 
-class PortfolioRefiner:
+def portfolio_manager_review(df_input):
     """
-    Portfolio Manager que revisa y ajusta los resultados del screener
-    aplicando límites de crecimiento realistas por sector
+    Función EXACTA del script original
+    Recibe DataFrame y retorna DataFrame refinado
     """
-    
-    # Límites de crecimiento realistas por sector
+    if df_input is None or df_input.empty:
+        print("❌ No hay datos para analizar. Ejecuta el paso anterior primero.")
+        return None
+
+    df = df_input.copy()
+
+    # 1. DEFINIR LÍMITES DE CRECIMIENTO REALISTAS POR SECTOR
+    # Un humano sabe que el Cloro no crece al 14%. El código ahora lo sabrá.
     SECTOR_CAPS = {
         'Consumer Defensive': 0.06,  # Max 6%
         'Utilities': 0.05,           # Max 5%
@@ -24,15 +30,118 @@ class PortfolioRefiner:
         'Technology': 0.15,          # Permitimos alto crecimiento
         'Healthcare': 0.12,
         'Communication Services': 0.12,
-        'Consumer Cyclical': 0.10,
-        'Basic Materials': 0.07,
-        'N/A': 0.10                  # Default
+        'Consumer Cyclical': 0.10
     }
+
+    report = []
+
+    for index, row in df.iterrows():
+        ticker = row['Ticker']
+        sector = row['Sector']
+        price = row['Price']
+        old_mos = row['MOS']
+        old_growth = row['Growth_Est']
+        roic = row['ROIC']
+        piotroski = row['Piotroski']
+
+        # --- LÓGICA DE FILTRADO ---
+
+        category = "❓ Revisar"
+        reason = ""
+        new_intrinsic = row['Intrinsic']
+        new_mos = old_mos
+
+        # A. ELIMINACIÓN DE FINANCIEROS (DCF Invalido)
+        if sector == 'Financial Services':
+            category = "🏦 Banco/Seguro"
+            reason = "Ignorar DCF. Valorar por Price/Book."
+            new_mos = 0  # Anulamos MOS para no confundir
+
+        # B. AJUSTE DE CRECIMIENTO (Reality Check)
+        else:
+            cap = SECTOR_CAPS.get(sector, 0.10)  # Default 10%
+
+            # Si el modelo anterior fue muy optimista, castigamos
+            if old_growth > cap:
+                adj_growth = cap
+                reason = f"Crecimiento ajustado de {old_growth:.1%} a {cap:.1%} (Sector)."
+
+                # Recalculamos DCF rápido con el nuevo crecimiento (Simplificado para ajuste)
+                # Asumimos que el Intrinsic es linealmente sensible al crecimiento en el Stage 1
+                # Factor de corrección aproximado:
+                correction_factor = (1 + adj_growth) / (1 + old_growth)
+                # Castigamos el valor intrínseco proporcionalmente (heurístico)
+                new_intrinsic = row['Intrinsic'] * (correction_factor ** 2.5)  # Elevado para ser conservador
+
+                if new_intrinsic > 0:
+                    new_mos = (new_intrinsic - price) / new_intrinsic
+                else:
+                    new_mos = -0.99
+
+            # C. CLASIFICACIÓN FINAL
+            if new_mos > 0.15:
+                # Si sigue barata tras el ajuste
+                if roic > 0.15 and piotroski >= 6:
+                    category = "💎 JOYA REAL"
+                    if not reason: 
+                        reason = "Alta Calidad + Precio Justo"
+                elif roic > 0.10:
+                    category = "✅ Oportunidad"
+                else:
+                    category = "⚠️ Trampa Valor"
+                    reason += " MOS alto pero Calidad Media."
+            elif new_mos > 0:
+                category = "⚖️ Precio Justo"
+            else:
+                category = "❌ Cara/Ajustada"
+                if "ajustado" in reason: 
+                    reason += " Ya no es atractiva tras ajuste."
+
+            # D. DETECTOR DE TRAMPAS DE DEUDA/CÍCLICAS
+            # Si el descuento es absurdo (>60%) y no es tech/biotech, sospechamos
+            if new_mos > 0.60 and sector not in ['Technology', 'Healthcare']:
+                category = "⚠️ Trampa Valor?"
+                reason = "Descuento sospechoso. Mercado descuenta quiebra o caída cíclica."
+
+        report.append({
+            'Ticker': ticker,
+            'Sector': sector,
+            'Cat': category,
+            'Why': reason,
+            'Old_MOS': old_mos,
+            'Real_MOS': new_mos,
+            'ROIC': roic,
+            'Piotroski': piotroski
+        })
+
+    # Crear DF y ordenar
+    res = pd.DataFrame(report)
+
+    # Orden de prioridad: Joyas -> Oportunidades -> Precio Justo -> Bancos -> Resto
+    cat_order = {
+        "💎 JOYA REAL": 0, 
+        "✅ Oportunidad": 1, 
+        "⚖️ Precio Justo": 2, 
+        "⚠️ Trampa Valor?": 3, 
+        "🏦 Banco/Seguro": 4, 
+        "❌ Cara/Ajustada": 5, 
+        "⚠️ Trampa Valor": 6
+    }
+    res['Sort'] = res['Cat'].map(cat_order)
+    res = res.sort_values(by=['Sort', 'Real_MOS'], ascending=[True, False]).drop('Sort', axis=1)
+
+    return res
+
+
+class PortfolioRefiner:
+    """
+    Wrapper para usar con el endpoint /refine
+    """
     
     def __init__(self, results_data):
         """
         Args:
-            results_data: Dict con los resultados del análisis o DataFrame
+            results_data: Dict con los resultados del análisis
         """
         self.raw_data = results_data
         self.df = None
@@ -44,6 +153,8 @@ class PortfolioRefiner:
             self.df = self.raw_data.copy()
         elif isinstance(self.raw_data, dict) and 'results' in self.raw_data:
             self.df = pd.DataFrame(self.raw_data['results'])
+        elif isinstance(self.raw_data, list):
+            self.df = pd.DataFrame(self.raw_data)
         else:
             print("❌ Formato de datos no válido")
             return False
@@ -55,127 +166,42 @@ class PortfolioRefiner:
         print(f"✅ Cargados {len(self.df)} resultados para refinar")
         return True
     
-    def refine_portfolio(self):
-        """
-        Ejecuta el análisis de refinamiento completo
-        """
-        if self.df is None or self.df.empty:
+    def refine_all(self):
+        """Pipeline completo de refinamiento"""
+        print("="*60)
+        print("🧠 El 'Portfolio Manager' está revisando los resultados...")
+        print("="*60)
+        
+        if not self.load_data():
             return None
         
-        report = []
+        # Ejecutar refinamiento con la función EXACTA del script original
+        self.refined_df = portfolio_manager_review(self.df)
         
-        for index, row in self.df.iterrows():
-            ticker = row.get('Ticker', 'UNKNOWN')
-            sector = row.get('Sector', 'N/A')
-            price = row.get('Price', 0)
-            old_mos = row.get('MOS', 0)
-            old_growth = row.get('Growth_Est', 0)
-            roic = row.get('ROIC', 0)
-            piotroski = row.get('Piotroski', 0)
-            intrinsic = row.get('Intrinsic', 0)
-            
-            # --- LÓGICA DE FILTRADO ---
-            category = "❓ Revisar"
-            reason = ""
-            new_intrinsic = intrinsic
-            new_mos = old_mos
-            
-            # A. ELIMINACIÓN DE FINANCIEROS (DCF Inválido)
-            if sector == 'Financial Services':
-                category = "🏦 Banco/Seguro"
-                reason = "Ignorar DCF. Valorar por Price/Book."
-                new_mos = 0  # Anulamos MOS para no confundir
-            
-            # B. AJUSTE DE CRECIMIENTO (Reality Check)
-            else:
-                cap = self.SECTOR_CAPS.get(sector, 0.10)  # Default 10%
-                
-                # Si el modelo anterior fue muy optimista, castigamos
-                if old_growth > cap:
-                    adj_growth = cap
-                    reason = f"Crecimiento ajustado de {old_growth:.1%} a {cap:.1%} (Sector)."
-                    
-                    # Recalculamos DCF rápido con el nuevo crecimiento
-                    # Factor de corrección aproximado:
-                    correction_factor = (1 + adj_growth) / (1 + old_growth) if old_growth > 0 else 1
-                    
-                    # Castigamos el valor intrínseco proporcionalmente (heurístico)
-                    new_intrinsic = intrinsic * (correction_factor ** 2.5)  # Elevado para ser conservador
-                    
-                    if new_intrinsic > 0 and price > 0:
-                        new_mos = (new_intrinsic - price) / new_intrinsic
-                    else:
-                        new_mos = -0.99
-                
-                # C. CLASIFICACIÓN FINAL
-                if new_mos > 0.15:
-                    # Si sigue barata tras el ajuste
-                    if roic > 0.15 and piotroski >= 6:
-                        category = "💎 JOYA REAL"
-                        if not reason: 
-                            reason = "Alta Calidad + Precio Justo"
-                    elif roic > 0.10:
-                        category = "✅ Oportunidad"
-                        if not reason:
-                            reason = "Buen descuento + Calidad aceptable"
-                    else:
-                        category = "⚠️ Trampa Valor"
-                        reason += " MOS alto pero Calidad Media."
-                        
-                elif new_mos > 0:
-                    category = "⚖️ Precio Justo"
-                    if not reason:
-                        reason = "Valoración razonable"
-                else:
-                    category = "❌ Cara/Ajustada"
-                    if "ajustado" in reason.lower():
-                        reason += " Ya no es atractiva tras ajuste."
-                    else:
-                        reason = "Sobrevalorada según DCF ajustado"
-                
-                # D. DETECTOR DE TRAMPAS DE DEUDA/CÍCLICAS
-                # Si el descuento es absurdo (>60%) y no es tech/biotech, sospechamos
-                if new_mos > 0.60 and sector not in ['Technology', 'Healthcare']:
-                    category = "⚠️ Trampa Valor?"
-                    reason = "Descuento sospechoso. Mercado descuenta quiebra o caída cíclica."
-            
-            report.append({
-                'Ticker': ticker,
-                'Sector': sector,
-                'Category': category,
-                'Reason': reason,
-                'Original_MOS': old_mos,
-                'Adjusted_MOS': new_mos,
-                'Original_Growth': old_growth,
-                'Sector_Cap_Growth': self.SECTOR_CAPS.get(sector, 0.10),
-                'ROIC': roic,
-                'Piotroski': piotroski,
-                'Price': price,
-                'Original_Intrinsic': intrinsic,
-                'Adjusted_Intrinsic': new_intrinsic
-            })
+        if self.refined_df is None or self.refined_df.empty:
+            print("❌ Error en refinamiento")
+            return None
         
-        # Crear DF y ordenar
-        self.refined_df = pd.DataFrame(report)
+        # Generar estadísticas
+        stats = self.get_summary_stats()
         
-        # Orden de prioridad
-        cat_order = {
-            "💎 JOYA REAL": 0,
-            "✅ Oportunidad": 1,
-            "⚖️ Precio Justo": 2,
-            "⚠️ Trampa Valor?": 3,
-            "🏦 Banco/Seguro": 4,
-            "❌ Cara/Ajustada": 5,
-            "⚠️ Trampa Valor": 6
-        }
+        print("\n" + "="*60)
+        print("✅ Refinamiento Completado")
+        print("="*60)
+        print(f"\n📊 Resultados:")
+        print(f"   💎 Joyas Reales: {stats['gems_count']}")
+        print(f"   ✅ Oportunidades: {stats['opportunities_count']}")
+        print(f"   ⚖️ Precio Justo: {stats['fair_count']}")
+        print(f"   ⚠️  Trampas de Valor: {stats['value_traps_count']}")
+        print(f"   🏦 Bancos/Seguros: {stats['banks_count']}")
         
-        self.refined_df['_sort'] = self.refined_df['Category'].map(cat_order)
-        self.refined_df = self.refined_df.sort_values(
-            by=['_sort', 'Adjusted_MOS'], 
-            ascending=[True, False]
-        ).drop('_sort', axis=1)
+        print("\n📋 Por Categoría:")
+        for cat, count in stats['by_category'].items():
+            print(f"   {cat}: {count}")
         
-        return self.refined_df
+        print("="*60)
+        
+        return self.export_to_dict()
     
     def get_summary_stats(self):
         """Genera estadísticas del refinamiento"""
@@ -184,39 +210,16 @@ class PortfolioRefiner:
         
         stats = {
             'total_reviewed': len(self.refined_df),
-            'by_category': self.refined_df['Category'].value_counts().to_dict(),
-            'gems_count': len(self.refined_df[self.refined_df['Category'] == '💎 JOYA REAL']),
-            'opportunities_count': len(self.refined_df[self.refined_df['Category'] == '✅ Oportunidad']),
-            'value_traps_count': len(self.refined_df[self.refined_df['Category'].str.contains('Trampa', na=False)]),
-            'avg_mos_adjustment': float((self.refined_df['Adjusted_MOS'] - self.refined_df['Original_MOS']).mean()),
-            'stocks_with_growth_adjustment': len(self.refined_df[self.refined_df['Reason'].str.contains('ajustado', na=False)])
+            'by_category': self.refined_df['Cat'].value_counts().to_dict(),
+            'gems_count': len(self.refined_df[self.refined_df['Cat'] == '💎 JOYA REAL']),
+            'opportunities_count': len(self.refined_df[self.refined_df['Cat'] == '✅ Oportunidad']),
+            'fair_count': len(self.refined_df[self.refined_df['Cat'] == '⚖️ Precio Justo']),
+            'value_traps_count': len(self.refined_df[self.refined_df['Cat'].str.contains('Trampa', na=False)]),
+            'banks_count': len(self.refined_df[self.refined_df['Cat'] == '🏦 Banco/Seguro']),
+            'avg_mos_change': float((self.refined_df['Real_MOS'] - self.refined_df['Old_MOS']).mean())
         }
         
         return stats
-    
-    def get_gems(self):
-        """Retorna solo las JOYAS REALES"""
-        if self.refined_df is None:
-            return []
-        
-        gems = self.refined_df[self.refined_df['Category'] == '💎 JOYA REAL']
-        return gems.to_dict('records')
-    
-    def get_opportunities(self):
-        """Retorna las Oportunidades"""
-        if self.refined_df is None:
-            return []
-        
-        opps = self.refined_df[self.refined_df['Category'] == '✅ Oportunidad']
-        return opps.to_dict('records')
-    
-    def get_value_traps(self):
-        """Retorna posibles trampas de valor"""
-        if self.refined_df is None:
-            return []
-        
-        traps = self.refined_df[self.refined_df['Category'].str.contains('Trampa', na=False)]
-        return traps.to_dict('records')
     
     def export_to_dict(self):
         """Exporta todos los datos refinados"""
@@ -226,62 +229,19 @@ class PortfolioRefiner:
         return {
             'refined_results': self.refined_df.to_dict('records'),
             'summary': self.get_summary_stats(),
-            'gems': self.get_gems(),
-            'opportunities': self.get_opportunities(),
-            'value_traps': self.get_value_traps()
+            'gems': self.refined_df[self.refined_df['Cat'] == '💎 JOYA REAL'].to_dict('records'),
+            'opportunities': self.refined_df[self.refined_df['Cat'] == '✅ Oportunidad'].to_dict('records'),
+            'fair_value': self.refined_df[self.refined_df['Cat'] == '⚖️ Precio Justo'].to_dict('records'),
+            'value_traps': self.refined_df[self.refined_df['Cat'].str.contains('Trampa', na=False)].to_dict('records'),
+            'banks': self.refined_df[self.refined_df['Cat'] == '🏦 Banco/Seguro'].to_dict('records')
         }
-    
-    def refine_all(self):
-        """Pipeline completo de refinamiento"""
-        print("="*60)
-        print("🧠 Portfolio Manager Review Iniciado")
-        print("="*60)
-        
-        if not self.load_data():
-            return None
-        
-        print("\n🔍 Analizando y ajustando resultados por sector...")
-        self.refine_portfolio()
-        
-        stats = self.get_summary_stats()
-        
-        print("\n" + "="*60)
-        print("✅ Refinamiento Completado")
-        print("="*60)
-        print(f"\n📊 Resultados:")
-        print(f"   💎 Joyas Reales: {stats['gems_count']}")
-        print(f"   ✅ Oportunidades: {stats['opportunities_count']}")
-        print(f"   ⚠️  Trampas de Valor: {stats['value_traps_count']}")
-        print(f"   📉 Ajustes de crecimiento: {stats['stocks_with_growth_adjustment']}")
-        print(f"   📊 Ajuste MOS promedio: {stats['avg_mos_adjustment']*100:.2f}%")
-        
-        print("\n📋 Por Categoría:")
-        for cat, count in stats['by_category'].items():
-            print(f"   {cat}: {count}")
-        
-        print("="*60)
-        
-        return self.export_to_dict()
-
-
-# Función helper
-def refine_results(results_data):
-    """
-    Función de conveniencia para refinar resultados
-    
-    Args:
-        results_data: Dict con resultados del análisis o DataFrame
-        
-    Returns:
-        Dict con datos refinados
-    """
-    refiner = PortfolioRefiner(results_data)
-    return refiner.refine_all()
 
 
 # Para uso standalone
 if __name__ == "__main__":
     print("Portfolio Refiner listo para recibir datos")
     print("Uso:")
-    print("  from portfolio_refiner import refine_results")
-    print("  refined = refine_results(results_data)")
+    print("  from portfolio_refiner import PortfolioRefiner")
+    print("  refiner = PortfolioRefiner(results_data)")
+    print("  refined = refiner.refine_all()")
+
