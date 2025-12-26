@@ -44,7 +44,7 @@ class PortfolioTracker:
                 self.tickers,
                 start=start_buffer,
                 end=today,
-                auto_adjust=True,
+                auto_adjust=True,  # ← IMPORTANTE: precios ajustados
                 progress=False
             )
             
@@ -61,17 +61,23 @@ class PortfolioTracker:
                 print("❌ No se encontraron datos para las fechas especificadas")
                 return False
             
+            # ⚠️ CORRECCIÓN: Convertir Series a DataFrame si es un solo ticker
             if isinstance(data, pd.Series):
                 data = data.to_frame()
+                data.columns = self.tickers  # ← Asegurar nombre de columna
             
             # Reordenar columnas según TICKERS
             self.data = data[self.tickers]
             
             print(f"✅ Datos descargados: {len(self.data)} días")
+            print(f"   Fecha inicio: {self.data.index[0].date()}")
+            print(f"   Fecha fin: {self.data.index[-1].date()}")
             return True
             
         except Exception as e:
             print(f"❌ Error descargando datos: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def calculate_portfolio_value(self):
@@ -79,8 +85,13 @@ class PortfolioTracker:
         # Normalizamos precios en 1 el día inicial
         normalized_prices = self.data / self.data.iloc[0]
         
-        # Índice del portafolio (valor relativo)
-        portfolio_index = (normalized_prices * self.weights).sum(axis=1)
+        # ⚠️ CORRECCIÓN: Manejar correctamente Series y DataFrame
+        if len(self.tickers) == 1:
+            # Un solo ticker: multiplicar directamente
+            portfolio_index = normalized_prices.iloc[:, 0] * self.weights[0]
+        else:
+            # Múltiples tickers: suma ponderada
+            portfolio_index = (normalized_prices * self.weights).sum(axis=1)
         
         # Valor nominal
         self.portfolio_value = portfolio_index * self.initial_capital
@@ -90,7 +101,11 @@ class PortfolioTracker:
         
     def calculate_metrics(self):
         """Calcula todas las métricas del portfolio"""
-        port_daily_ret = (self.daily_returns * self.weights).sum(axis=1)
+        # ⚠️ CORRECCIÓN: Calcular retornos diarios del portfolio correctamente
+        if len(self.tickers) == 1:
+            port_daily_ret = self.daily_returns.iloc[:, 0] * self.weights[0]
+        else:
+            port_daily_ret = (self.daily_returns * self.weights).sum(axis=1)
         
         # Retorno total
         total_return = self.portfolio_value.iloc[-1] / self.portfolio_value.iloc[0] - 1
@@ -113,7 +128,7 @@ class PortfolioTracker:
         # Volatilidad anualizada
         port_vol_annual = port_daily_ret.std() * np.sqrt(252)
         
-        # Sharpe ratio (rf ≈ 0)
+        # ⚠️ CORRECCIÓN: Sharpe ratio (exactamente como el script original)
         if not np.isnan(port_vol_annual) and port_vol_annual != 0 and years_invested > 0:
             sharpe = ((1 + total_return) ** (1/years_invested) - 1) / port_vol_annual
         else:
@@ -138,16 +153,22 @@ class PortfolioTracker:
         # Retorno total de cada activo
         returns_by_ticker = self.data.iloc[-1] / self.data.iloc[0] - 1
         
+        # ⚠️ CORRECCIÓN: Convertir a numpy array si es Series
+        if isinstance(returns_by_ticker, pd.Series):
+            returns_values = returns_by_ticker.values
+        else:
+            returns_values = returns_by_ticker
+        
         # Capital invertido y valor actual por activo
-        capital_by_ticker = self.initial_capital * self.weights  # numpy array
-        current_value_by_ticker = capital_by_ticker * (1 + returns_by_ticker.values)  # usar .values
+        capital_by_ticker = self.initial_capital * self.weights
+        current_value_by_ticker = capital_by_ticker * (1 + returns_values)
         pnl_by_ticker = current_value_by_ticker - capital_by_ticker
         
         # Volatilidad anual por ticker
         vol_by_ticker = self.daily_returns.std() * np.sqrt(252)
         
         # Contribución al retorno del portafolio
-        contrib_return = self.weights * returns_by_ticker.values
+        contrib_return = self.weights * returns_values
         contrib_sum = contrib_return.sum()
         contrib_return_pct = contrib_return / contrib_sum if contrib_sum != 0 else contrib_return
         
@@ -159,25 +180,36 @@ class PortfolioTracker:
                 'capital_inicial': float(capital_by_ticker[i]),
                 'valor_actual': float(current_value_by_ticker[i]),
                 'ganancia_perdida': float(pnl_by_ticker[i]),
-                'retorno_pct': float(returns_by_ticker.iloc[i] * 100),
-                'volatilidad_anual_pct': float(vol_by_ticker.iloc[i] * 100),
+                'retorno_pct': float(returns_by_ticker.iloc[i] * 100) if isinstance(returns_by_ticker, pd.Series) else float(returns_by_ticker[i] * 100),
+                'volatilidad_anual_pct': float(vol_by_ticker.iloc[i] * 100) if isinstance(vol_by_ticker, pd.Series) else float(vol_by_ticker[i] * 100),
                 'contribucion_retorno_pct': float(contrib_return_pct[i] * 100)
             })
         
         # Identificar mejor y peor
-        best_idx = returns_by_ticker.idxmax()
-        worst_idx = returns_by_ticker.idxmin()
+        if isinstance(returns_by_ticker, pd.Series):
+            best_idx = returns_by_ticker.idxmax()
+            worst_idx = returns_by_ticker.idxmin()
+            best_return = returns_by_ticker[best_idx]
+            worst_return = returns_by_ticker[worst_idx]
+        else:
+            best_i = int(np.argmax(returns_values))
+            worst_i = int(np.argmin(returns_values))
+            best_idx = self.tickers[best_i]
+            worst_idx = self.tickers[worst_i]
+            best_return = returns_values[best_i]
+            worst_return = returns_values[worst_i]
+        
         top_contrib_idx = int(np.argmax(contrib_return_pct))
         
         return {
             'detalle_por_accion': per_ticker,
             'mejor_accion': {
                 'ticker': best_idx,
-                'retorno_pct': float(returns_by_ticker[best_idx] * 100)
+                'retorno_pct': float(best_return * 100)
             },
             'peor_accion': {
                 'ticker': worst_idx,
-                'retorno_pct': float(returns_by_ticker[worst_idx] * 100)
+                'retorno_pct': float(worst_return * 100)
             },
             'mayor_contribucion': {
                 'ticker': self.tickers[top_contrib_idx],
