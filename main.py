@@ -449,7 +449,7 @@ def compute_piotroski_fscore(inc, bal, cf):
 # 4. ANÁLISIS FINANCIERO (DCF 2-STAGE + CALIDAD)
 # ==========================================
 def analyze_stock_v7(ticker):
-    """Analiza una acción individual con metodología Warren Buffett + DCF + Piotroski Real"""
+    """V7.2 - EXACTO del Colab sin modificaciones"""
     try:
         t = yf.Ticker(ticker)
 
@@ -458,26 +458,18 @@ def analyze_stock_v7(ticker):
             fast = t.fast_info
             market_cap = safe_float(getattr(fast, "market_cap", np.nan))
             if np.isnan(market_cap) or market_cap < 5_000_000_000:
-                if ticker == "PFG":
-                    log(f"❌ PFG rejected: market_cap filter (${market_cap:,.0f})")
                 return None
             price = safe_float(getattr(fast, "last_price", np.nan))
             shares = safe_float(getattr(fast, "shares", np.nan))
             if np.isnan(price) or price <= 0 or np.isnan(shares) or shares <= 0:
-                if ticker == "PFG":
-                    log(f"❌ PFG rejected: price/shares filter (price=${price}, shares={shares})")
                 return None
-        except Exception as e:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: fast_info error ({e})")
+        except:
             return None
 
         inc = t.income_stmt
         bal = t.balance_sheet
         cf  = t.cashflow
         if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: empty statements (inc={inc is not None and not inc.empty}, bal={bal is not None and not bal.empty}, cf={cf is not None and not cf.empty})")
             return None
 
         # Orden cronológico (más reciente primero)
@@ -515,8 +507,6 @@ def analyze_stock_v7(ticker):
         ])
 
         if ni.empty or ocf.empty or equity.empty:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: empty series (ni={not ni.empty}, ocf={not ocf.empty}, equity={not equity.empty})")
             return None
 
         # --- valores actuales ---
@@ -527,23 +517,17 @@ def analyze_stock_v7(ticker):
 
         invested_cap = curr_eq + curr_debt - curr_cash
         roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0.0
-        if roic < CONFIG['MIN_ROIC']:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: ROIC filter ({roic:.1%} < {CONFIG['MIN_ROIC']:.1%})")
+        if roic < CONFIG["MIN_ROIC"]:
             return None
 
         # ✅ Piotroski REAL (0-9) + coverage
         piotroski, pio_cov = compute_piotroski_fscore(inc, bal, cf)
 
         # Si coverage es bajo, no confiamos
-        if pio_cov < CONFIG['MIN_PIO_COVERAGE']:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: Piotroski coverage filter (coverage={pio_cov} < {CONFIG['MIN_PIO_COVERAGE']})")
+        if pio_cov < CONFIG["MIN_PIO_COVERAGE"]:
             return None
 
-        if piotroski < CONFIG['MIN_PIOTROSKI']:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: Piotroski score filter (score={piotroski} < {CONFIG['MIN_PIOTROSKI']})")
+        if piotroski < CONFIG["MIN_PIOTROSKI"]:
             return None
 
         sector = t.info.get("sector", "N/A")
@@ -566,7 +550,7 @@ def analyze_stock_v7(ticker):
         tv_weight = np.nan
 
         if (not np.isnan(fcf)) and fcf > 0:
-            r = CONFIG['DISCOUNT_RATE']
+            r = CONFIG["DISCOUNT_RATE"]
 
             pv_stage1 = 0.0
             for i in range(1, 6):
@@ -574,8 +558,6 @@ def analyze_stock_v7(ticker):
                 pv_stage1 += fcf_i / ((1 + r) ** i)
 
             if r <= terminal_g:
-                if ticker == "PFG":
-                    log(f"❌ PFG rejected: terminal_g >= discount rate (r={r}, terminal_g={terminal_g})")
                 return None
 
             terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
@@ -591,16 +573,11 @@ def analyze_stock_v7(ticker):
                 tv_weight = pv_tv / ev if ev > 0 else np.nan
 
         # filtro salida
-        if mos < CONFIG['MARGIN_OF_SAFETY_VIEW'] and piotroski < 7:
-            if ticker == "PFG":
-                log(f"❌ PFG rejected: final MOS filter (MOS={mos:.1%} < {CONFIG['MARGIN_OF_SAFETY_VIEW']:.1%} AND Piotroski={piotroski} < 7)")
+        if mos < CONFIG["MARGIN_OF_SAFETY_VIEW"] and piotroski < 7:
             return None
 
         debt_to_mcap = (curr_debt / market_cap) if (market_cap > 0) else np.nan
         fcf_yield = (fcf / market_cap) if (market_cap > 0 and not np.isnan(fcf)) else np.nan
-
-        if ticker == "PFG":
-            log(f"✅ PFG PASSED! ROIC={roic:.1%}, Piotroski={piotroski}/{pio_cov}, MOS={mos:.1%}")
 
         return {
             "Ticker": ticker,
@@ -631,12 +608,9 @@ def analyze_stock_v7(ticker):
             "DCF_TV_Weight": tv_weight
         }
 
-    except Exception as e:
-        if ticker == "PFG":
-            log(f"❌ PFG exception: {e}")
-            import traceback
-            traceback.print_exc()
+    except Exception:
         return None
+
 
 # ==========================================
 # 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
