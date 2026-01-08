@@ -65,18 +65,18 @@ except Exception as e:
     bucket = None
 
 # ==========================================
-# ⚙️ PARÁMETROS DE CAZA (AJUSTADOS)
+# ⚙️ CONFIG
 # ==========================================
 CONFIG = {
-    'MAX_WORKERS': 12,
-    'MIN_ROIC': 0.08,           # 8% mínimo
-    
+    "MAX_WORKERS": 12,
+    "MIN_ROIC": 0.08,
+
     # ✅ Piotroski REAL (0-9)
-    'MIN_PIOTROSKI': 6,         # 6 = ok, 7 = fuerte, 8+ excelente
-    'MIN_PIO_COVERAGE': 7,      # mínimo señales evaluadas (de 9)
-    
-    'DISCOUNT_RATE': 0.09,      # Tasa exigida del 9%
-    'MARGIN_OF_SAFETY_VIEW': -0.20  # Watchlist hasta -20%
+    "MIN_PIOTROSKI": 6,        # 6 = ok, 7 = fuerte, 8+ excelente
+    "MIN_PIO_COVERAGE": 7,     # mínimo señales evaluadas (de 9)
+
+    "DISCOUNT_RATE": 0.09,
+    "MARGIN_OF_SAFETY_VIEW": -0.20
 }
 
 # Terminal growth por sector (evita inflar bond proxies)
@@ -636,7 +636,7 @@ def run_analysis():
     
     # 2. Análisis paralelo
     results = []
-    with ThreadPoolExecutor(max_workers=CONFIG['MAX_WORKERS']) as executor:
+    with ThreadPoolExecutor(max_workers=CONFIG["MAX_WORKERS"]) as executor:
         futures = {executor.submit(analyze_stock_v7, t): t for t in tickers}
         for future in as_completed(futures):
             r = future.result()
@@ -721,9 +721,9 @@ def home():
         ],
         "filters": {
             "min_market_cap": "5B USD",
-            "min_roic": f"{CONFIG['MIN_ROIC']*100}%",
-            "min_piotroski": CONFIG['MIN_PIOTROSKI'],
-            "discount_rate": f"{CONFIG['DISCOUNT_RATE']*100}%"
+            "min_roic": f"{CONFIG["MIN_ROIC"]*100}%",
+            "min_piotroski": CONFIG["MIN_PIOTROSKI"],
+            "discount_rate": f"{CONFIG["DISCOUNT_RATE"]*100}%"
         },
         "endpoints": {
             "/analyze": "Run analysis (with 24h cache + auto post-processing)",
