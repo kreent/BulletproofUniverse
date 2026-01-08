@@ -429,7 +429,10 @@ def analyze_stock_v7(ticker):
 # 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
 # ==========================================
 def run_analysis():
-    """Ejecuta el análisis completo con caché"""
+    """
+    Ejecuta el análisis completo con caché
+    AJUSTADO: Lógica idéntica a Colab, estructura de salida mantenida
+    """
     
     # Verificar caché primero
     cached = get_cached_results()
@@ -443,11 +446,11 @@ def run_analysis():
     log("🎯 Iniciando Warren Screener v8")
     log("="*60)
     
-    # 1. Obtener universo
+    # 1. Obtener universo (IGUAL que Colab)
     tickers = get_bulletproof_universe()
     log(f"🎯 Objetivo Real: Analizar {len(tickers)} empresas.")
     
-    # 2. Análisis paralelo
+    # 2. Análisis paralelo (IGUAL que Colab)
     results = []
     with ThreadPoolExecutor(max_workers=CONFIG['MAX_WORKERS']) as executor:
         futures = {executor.submit(analyze_stock_v7, t): t for t in tickers}
@@ -467,15 +470,16 @@ def run_analysis():
         log("❌ Sin resultados finales")
         return error_result
     
+    # 4. Crear DataFrame (IGUAL que Colab)
     df = pd.DataFrame(results)
     df = df.sort_values(by='MOS', ascending=False, na_position='last')
     
-    # 4. Clasificación
+    # 5. Clasificación (IGUAL que Colab)
     buy_candidates = df[df['MOS'] > 0.10].copy() if 'MOS' in df.columns else pd.DataFrame()
     fair_value = df[(df['MOS'] > 0) & (df['MOS'] <= 0.10)].copy() if 'MOS' in df.columns else pd.DataFrame()
     watchlist = df[df['MOS'] <= 0].copy() if 'MOS' in df.columns else pd.DataFrame()
     
-    # 5. Resultado final
+    # 6. Resultado final - MANTENER ESTRUCTURA ACTUAL
     execution_time = round(time.time() - start_time, 2)
     
     # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
@@ -510,6 +514,7 @@ def run_analysis():
     save_to_cache(result)
     
     return result
+
 
 # -------- Flask App --------
 app = Flask(__name__)
