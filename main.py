@@ -70,9 +70,29 @@ except Exception as e:
 CONFIG = {
     'MAX_WORKERS': 12,
     'MIN_ROIC': 0.08,           # 8% mínimo
-    'MIN_PIOTROSKI': 5,         # Calidad mínima
+    
+    # ✅ Piotroski REAL (0-9)
+    'MIN_PIOTROSKI': 6,         # 6 = ok, 7 = fuerte, 8+ excelente
+    'MIN_PIO_COVERAGE': 7,      # mínimo señales evaluadas (de 9)
+    
     'DISCOUNT_RATE': 0.09,      # Tasa exigida del 9%
     'MARGIN_OF_SAFETY_VIEW': -0.20  # Watchlist hasta -20%
+}
+
+# Terminal growth por sector (evita inflar bond proxies)
+TERMINAL_G_BY_SECTOR = {
+    "Communication Services": 0.015,
+    "Utilities": 0.015,
+    "Consumer Defensive": 0.020,
+    "Real Estate": 0.020,
+    "Energy": 0.020,
+    "Basic Materials": 0.020,
+    "Industrials": 0.020,
+    "Technology": 0.025,
+    "Healthcare": 0.022,
+    "Consumer Cyclical": 0.022,
+    "Financial Services": 0.020,
+    "N/A": 0.020
 }
 
 def log(msg):
@@ -184,26 +204,37 @@ def save_to_cache(results):
 # 1. UNIVERSO INDESTRUCTIBLE (CSV + HARDCODE)
 # ==========================================
 def get_bulletproof_universe():
-    """
-    Genera el universo de tickers - SINCRONIZADO CON COLAB
-    Usa EXACTAMENTE la misma lista de respaldo que Colab (90 tickers)
-    """
     tickers = set()
     print("🌍 Generando Universo...")
 
-    # Intento 1: GitHub S&P 500
+    # Intento 1: GitHub API (más confiable que raw)
     try:
-        url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-        df = pd.read_csv(url_sp500, timeout=30)
+        # Usando GitHub API en lugar de raw.githubusercontent.com
+        url_sp500 = "https://api.github.com/repos/datasets/s-and-p-500-companies/contents/data/constituents.csv"
+        headers = {'Accept': 'application/vnd.github.v3.raw'}
+        r = requests.get(url_sp500, headers=headers, timeout=30)
+        r.raise_for_status()
+        from io import StringIO
+        df = pd.read_csv(StringIO(r.text))
         tickers.update(df['Symbol'].tolist())
-        print(f"   -> S&P 500 cargado desde GitHub ({len(tickers)})")
+        print(f"   -> S&P 500 cargado desde GitHub API ({len(tickers)})")
     except Exception as e:
         print(f"   ⚠️ Fallo GitHub S&P 500: {str(e)}")
+        
+        # Fallback: Intentar con raw.githubusercontent.com
+        try:
+            url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+            df = pd.read_csv(url_sp500, timeout=30)
+            tickers.update(df['Symbol'].tolist())
+            print(f"   -> S&P 500 cargado desde GitHub raw ({len(tickers)})")
+        except Exception as e2:
+            print(f"   ⚠️ Fallo GitHub raw: {str(e2)}")
 
     # Intento 2: Nasdaq 100
     try:
-        url_ndx = "https://raw.githubusercontent.com/nasdaq-100/nasdaq-100-symbols/master/nasdaq-100-symbols.csv"
-        r = requests.get(url_ndx, timeout=30)
+        url_ndx = "https://api.github.com/repos/nasdaq-100/nasdaq-100-symbols/contents/nasdaq-100-symbols.csv"
+        headers = {'Accept': 'application/vnd.github.v3.raw'}
+        r = requests.get(url_ndx, headers=headers, timeout=30)
         if r.status_code == 200:
             text = r.text
             lines = text.split('\n')
@@ -213,8 +244,10 @@ def get_bulletproof_universe():
     except Exception as e:
         print(f"   ⚠️ Fallo GitHub Nasdaq: {str(e)}")
 
-    # Intento 3: Lista de Respaldo MANUAL - EXACTA DE COLAB (90 tickers)
+    # Intento 3: Lista de Respaldo MANUAL COMPLETA
+    # Lista actualizada con TODOS los tickers que aparecen en Colab
     BACKUP_LIST = [
+        # Originales (90 tickers)
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
         'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
         'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
@@ -223,7 +256,38 @@ def get_bulletproof_universe():
         'VZ', 'UPS', 'PM', 'NEE', 'RTX', 'MS', 'HON', 'AMGN', 'UNP', 'PFE',
         'LOW', 'SPGI', 'CAT', 'IBM', 'AMAT', 'DE', 'GS', 'GE', 'LMT', 'PLD',
         'BLK', 'SYK', 'T', 'ISRG', 'BKNG', 'ELV', 'MDT', 'TJX', 'ADI', 'NOW',
-        'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI'
+        'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI',
+        # Agregados - Los que salen en Colab pero faltaban
+        'MET', 'AMP', 'KMB', 'FCX', 'CLX', 'IT', 'BIIB', 'CL', 'ZBRA', 'WSM',
+        'MKTX', 'LII', 'FDS', 'RL', 'HAS',
+        # Más del S&P 500 para completar
+        'GOOG', 'BRK-A', 'AVGO', 'TSLA', 'JPM', 'UNH', 'LLY', 'XOM', 'V', 'PG',
+        'JNJ', 'MA', 'NVDA', 'HD', 'ABBV', 'MRK', 'COST', 'CVX', 'ADBE', 'PEP',
+        'KO', 'TMO', 'CSCO', 'ACN', 'MCD', 'ABT', 'NFLX', 'WFC', 'ORCL', 'CRM',
+        'DHR', 'TXN', 'AMD', 'CMCSA', 'QCOM', 'INTU', 'NKE', 'VZ', 'PM', 'UPS',
+        'NEE', 'RTX', 'HON', 'AMGN', 'LOW', 'SPGI', 'BMY', 'SBUX', 'BA', 'CAT',
+        'GS', 'IBM', 'AXP', 'ISRG', 'GILD', 'BLK', 'DE', 'ELV', 'MDT', 'SCHW',
+        'AMAT', 'SYK', 'PLD', 'LMT', 'ADI', 'BKNG', 'VRTX', 'TJX', 'REGN', 'ADP',
+        'MDLZ', 'CB', 'NOW', 'LRCX', 'MO', 'AMT', 'MMC', 'PYPL', 'PGR', 'SO',
+        'CI', 'DUK', 'ETN', 'BSX', 'SLB', 'ZTS', 'GE', 'EQIX', 'PNC', 'NOC',
+        'USB', 'TGT', 'ITW', 'REGN', 'BDX', 'MU', 'HCA', 'MS', 'WELL', 'KLAC',
+        'EOG', 'C', 'MMM', 'APH', 'FI', 'MCK', 'WM', 'PH', 'SNPS', 'CDNS',
+        'SHW', 'CMG', 'MAR', 'TDG', 'EMR', 'NSC', 'APD', 'MSI', 'NXPI', 'CARR',
+        'PSX', 'ADSK', 'CSX', 'CME', 'COP', 'MPC', 'TT', 'AJG', 'MCO', 'GM',
+        'AFL', 'ROP', 'PCAR', 'O', 'MCHP', 'SRE', 'HUM', 'ORLY', 'AZO', 'PAYX',
+        'D', 'ICE', 'MSCI', 'FTNT', 'KMB', 'ROST', 'ECL', 'AIG', 'TRV', 'CCI',
+        'JCI', 'TEL', 'CPRT', 'AEP', 'CL', 'HSY', 'GWW', 'PSA', 'MNST', 'KMI',
+        'EW', 'FAST', 'BK', 'CTAS', 'FCX', 'NEM', 'ALL', 'ODFL', 'DLR', 'EXC',
+        'SPG', 'CMI', 'IQV', 'KHC', 'CTVA', 'YUM', 'EA', 'XEL', 'GIS', 'VRSK',
+        'AME', 'DXCM', 'HLT', 'KVUE', 'PCG', 'DD', 'OTIS', 'RSG', 'IDXX', 'A',
+        'ANSS', 'VICI', 'VMC', 'MLM', 'BKR', 'KEYS', 'CTSH', 'IT', 'WMB', 'ROK',
+        'EXR', 'OKE', 'RMD', 'PPG', 'DOV', 'GEHC', 'AVB', 'BIIB', 'FICO', 'SYY',
+        'EIX', 'ED', 'CBRE', 'TROW', 'MTD', 'IRM', 'DAL', 'ALNY', 'HAL', 'ACGL',
+        'MPWR', 'WEC', 'WSM', 'XYL', 'FTV', 'GLW', 'WBD', 'FITB', 'IR', 'CHTR',
+        'CDW', 'HPQ', 'TSCO', 'AWK', 'DTE', 'ES', 'CAH', 'PPL', 'FDS', 'ETR',
+        'LH', 'GPN', 'CHD', 'EBAY', 'KEYS', 'RF', 'MTB', 'HPE', 'RL', 'ZBRA',
+        'TTWO', 'NTAP', 'STT', 'BALL', 'CLX', 'HAS', 'LUV', 'UAL', 'MKTX',
+        'LII', 'AMP', 'MET', 'ULTA', 'APTV', 'STE', 'DFS', 'CFG', 'INVH', 'HBAN'
     ]
 
     if len(tickers) < 50:
@@ -233,16 +297,17 @@ def get_bulletproof_universe():
     final_list = list(set([t.replace('.', '-') for t in tickers]))
     final_count = min(500, len(final_list))
     print(f"   ✅ Total final: {final_count} tickers para analizar")
-    return final_list[:500]
+    return final_list[:500] # Limitamos a 500 para velocidad
 
 # ==========================================
 # 2. MOTOR DE BÚSQUEDA FUZZY (V5 Core)
 # ==========================================
 def get_fuzzy_series(df, keywords):
     """Búsqueda fuzzy de campos en DataFrames financieros"""
-    if df.empty: 
+    if df is None or df.empty: 
         return pd.Series(dtype=float)
     
+    df = df.copy()
     df.index = df.index.astype(str).str.lower().str.strip()
     
     for key in keywords:
@@ -255,140 +320,302 @@ def get_fuzzy_series(df, keywords):
     
     return pd.Series(dtype=float)
 
+def safe_float(x):
+    """Convierte valor a float de forma segura"""
+    try:
+        if x is None:
+            return np.nan
+        if isinstance(x, (np.floating, float)) and np.isnan(x):
+            return np.nan
+        return float(x)
+    except:
+        return np.nan
+
+def get_latest_and_prev(series: pd.Series):
+    """Obtiene el valor más reciente y el anterior de una serie"""
+    if series is None or series.empty:
+        return (np.nan, np.nan)
+    a = safe_float(series.iloc[0])
+    b = safe_float(series.iloc[1]) if len(series) > 1 else np.nan
+    return a, b
+
 # ==========================================
-# 3. ANÁLISIS FINANCIERO (DCF 2-STAGE + CALIDAD)
+# 3. REAL PIOTROSKI (0–9) + COVERAGE
+# ==========================================
+def compute_piotroski_fscore(inc, bal, cf):
+    """
+    Piotroski F-Score real (0-9).
+    Retorna: (score, coverage) donde coverage = #señales evaluadas.
+    """
+    score = 0
+    covered = 0
+
+    # Series necesarias
+    ni = get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+    ocf = get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+
+    assets = get_fuzzy_series(bal, ["Total Assets"])
+    # deuda ideal: long term, si no total
+    ltd = get_fuzzy_series(bal, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"])
+    if ltd.empty:
+        ltd = get_fuzzy_series(bal, ["Total Debt"])
+
+    current_assets = get_fuzzy_series(bal, ["Current Assets", "Total Current Assets"])
+    current_liab = get_fuzzy_series(bal, ["Current Liabilities", "Total Current Liabilities"])
+
+    revenue = get_fuzzy_series(inc, ["Total Revenue", "Revenue"])
+    gross_profit = get_fuzzy_series(inc, ["Gross Profit"])
+
+    shares = get_fuzzy_series(bal, ["Ordinary Shares Number", "Share Issued"])
+
+    # Valores t y t-1
+    ni_t, ni_t1 = get_latest_and_prev(ni)
+    ocf_t, ocf_t1 = get_latest_and_prev(ocf)
+    assets_t, assets_t1 = get_latest_and_prev(assets)
+    ltd_t, ltd_t1 = get_latest_and_prev(ltd)
+    ca_t, ca_t1 = get_latest_and_prev(current_assets)
+    cl_t, cl_t1 = get_latest_and_prev(current_liab)
+    rev_t, rev_t1 = get_latest_and_prev(revenue)
+    gp_t, gp_t1 = get_latest_and_prev(gross_profit)
+    sh_t, sh_t1 = get_latest_and_prev(shares)
+
+    def ratio(a, b):
+        return a / b if (not np.isnan(a) and not np.isnan(b) and b != 0) else np.nan
+
+    # Ratios
+    roa_t = ratio(ni_t, assets_t)
+    roa_t1 = ratio(ni_t1, assets_t1)
+
+    cr_t = ratio(ca_t, cl_t)
+    cr_t1 = ratio(ca_t1, cl_t1)
+
+    lev_t = ratio(ltd_t, assets_t)
+    lev_t1 = ratio(ltd_t1, assets_t1)
+
+    gm_t = ratio(gp_t, rev_t)
+    gm_t1 = ratio(gp_t1, rev_t1)
+
+    at_t = ratio(rev_t, assets_t)
+    at_t1 = ratio(rev_t1, assets_t1)
+
+    # 1) ROA > 0
+    if not np.isnan(roa_t):
+        covered += 1
+        score += 1 if roa_t > 0 else 0
+
+    # 2) CFO > 0
+    if not np.isnan(ocf_t):
+        covered += 1
+        score += 1 if ocf_t > 0 else 0
+
+    # 3) ΔROA > 0
+    if not np.isnan(roa_t) and not np.isnan(roa_t1):
+        covered += 1
+        score += 1 if roa_t > roa_t1 else 0
+
+    # 4) Accrual: CFO > NI
+    if not np.isnan(ocf_t) and not np.isnan(ni_t):
+        covered += 1
+        score += 1 if ocf_t > ni_t else 0
+
+    # 5) ΔLeverage: lev baja
+    if not np.isnan(lev_t) and not np.isnan(lev_t1):
+        covered += 1
+        score += 1 if lev_t < lev_t1 else 0
+
+    # 6) ΔLiquidity: current ratio mejora
+    if not np.isnan(cr_t) and not np.isnan(cr_t1):
+        covered += 1
+        score += 1 if cr_t > cr_t1 else 0
+
+    # 7) No dilution: shares no suben
+    if not np.isnan(sh_t) and not np.isnan(sh_t1):
+        covered += 1
+        score += 1 if sh_t <= sh_t1 else 0
+
+    # 8) ΔGross margin: GM mejora
+    if not np.isnan(gm_t) and not np.isnan(gm_t1):
+        covered += 1
+        score += 1 if gm_t > gm_t1 else 0
+
+    # 9) ΔAsset turnover: AT mejora
+    if not np.isnan(at_t) and not np.isnan(at_t1):
+        covered += 1
+        score += 1 if at_t > at_t1 else 0
+
+    return score, covered
+
+# ==========================================
+# 4. ANÁLISIS FINANCIERO (DCF 2-STAGE + CALIDAD)
 # ==========================================
 def analyze_stock_v7(ticker):
-    """Analiza una acción individual con metodología Warren Buffett + DCF"""
+    """Analiza una acción individual con metodología Warren Buffett + DCF + Piotroski Real"""
     try:
         t = yf.Ticker(ticker)
 
-        # Filtro rápido de liquidez/precio
+        # Fast filter
         try:
             fast = t.fast_info
-            if fast.market_cap < 5_000_000_000: 
-                return None  # Solo > 5B Cap
-        except: 
+            market_cap = safe_float(getattr(fast, "market_cap", np.nan))
+            if np.isnan(market_cap) or market_cap < 5_000_000_000:
+                return None
+            price = safe_float(getattr(fast, "last_price", np.nan))
+            shares = safe_float(getattr(fast, "shares", np.nan))
+            if np.isnan(price) or price <= 0 or np.isnan(shares) or shares <= 0:
+                return None
+        except:
             return None
 
         inc = t.income_stmt
         bal = t.balance_sheet
-        cf = t.cashflow
-
-        if inc.empty or bal.empty or cf.empty: 
+        cf  = t.cashflow
+        if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
             return None
 
-        # Ordenar cronológicamente
+        # Orden cronológico (más reciente primero)
         inc = inc[sorted(inc.columns, reverse=True)]
         bal = bal[sorted(bal.columns, reverse=True)]
-        cf = cf[sorted(cf.columns, reverse=True)]
+        cf  = cf[sorted(cf.columns, reverse=True)]
 
-        # Extracción Fuzzy
-        ni = get_fuzzy_series(inc, ['Net Income', 'NetIncome'])
-        ebit = get_fuzzy_series(inc, ['EBIT', 'Operating Income'])
-        ocf = get_fuzzy_series(cf, ['Operating Cash Flow', 'Total Cash From Operating Activities'])
-        capex = get_fuzzy_series(cf, ['Capital Expenditures', 'Purchase of PPE'])
-        equity = get_fuzzy_series(bal, ['Stockholders Equity', 'Total Equity'])
-        debt = get_fuzzy_series(bal, ['Total Debt'])
-        cash = get_fuzzy_series(bal, ['Cash', 'Cash And Cash Equivalents'])
+        # --- extracción fuzzy ---
+        ni = get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+        ebit = get_fuzzy_series(inc, ["EBIT", "Operating Income"])
+        ocf = get_fuzzy_series(cf,  ["Operating Cash Flow", "Total Cash From Operating Activities"])
 
-        if ni.empty or ocf.empty or equity.empty: 
+        capex = get_fuzzy_series(cf, [
+            "Capital Expenditures",
+            "Purchase of PPE",
+            "Investments in Property Plant and Equipment"
+        ])
+
+        equity = get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
+
+        # Deuda robusta
+        debt = get_fuzzy_series(bal, [
+            "Total Debt",
+            "Long Term Debt",
+            "Long Term Debt And Capital Lease Obligation",
+            "Short Long Term Debt",
+            "Short Term Debt"
+        ])
+
+        # Cash robusto
+        cash = get_fuzzy_series(bal, [
+            "Cash",
+            "Cash And Cash Equivalents",
+            "Cash Cash Equivalents And Short Term Investments"
+        ])
+
+        if ni.empty or ocf.empty or equity.empty:
             return None
 
-        # --- A. CALIDAD (ROIC & PIOTROSKI) ---
-        # ROIC
-        curr_ebit = ebit.iloc[0] if not ebit.empty else ni.iloc[0]
-        curr_eq = equity.iloc[0]
-        curr_debt = debt.iloc[0] if not debt.empty else 0
-        curr_cash = cash.iloc[0] if not cash.empty else 0
+        # --- valores actuales ---
+        curr_ebit = safe_float(ebit.iloc[0]) if (not ebit.empty and not pd.isna(ebit.iloc[0])) else safe_float(ni.iloc[0])
+        curr_eq   = safe_float(equity.iloc[0]) if not pd.isna(equity.iloc[0]) else 0.0
+        curr_debt = safe_float(debt.iloc[0]) if (not debt.empty and not pd.isna(debt.iloc[0])) else 0.0
+        curr_cash = safe_float(cash.iloc[0]) if (not cash.empty and not pd.isna(cash.iloc[0])) else 0.0
 
         invested_cap = curr_eq + curr_debt - curr_cash
-        roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0
-
-        if roic < CONFIG['MIN_ROIC']: 
+        roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0.0
+        if roic < CONFIG['MIN_ROIC']:
             return None
 
-        # Piotroski Rápido
-        piotroski = 0
-        try:
-            if len(ni) > 1:
-                piotroski += 1 if ni.iloc[0] > 0 else 0
-                piotroski += 1 if ocf.iloc[0] > 0 else 0
-                piotroski += 1 if ni.iloc[0] > ni.iloc[1] else 0
-                piotroski += 1 if ocf.iloc[0] > ni.iloc[0] else 0
-                piotroski += 1 if (not debt.empty and len(debt)>1 and curr_debt <= debt.iloc[1]) else 0
-            else: 
-                piotroski = 5  # Beneficio de la duda
-        except: 
-            piotroski = 5
+        # ✅ Piotroski REAL (0-9) + coverage
+        piotroski, pio_cov = compute_piotroski_fscore(inc, bal, cf)
 
-        if piotroski < CONFIG['MIN_PIOTROSKI']: 
+        # Si coverage es bajo, no confiamos
+        if pio_cov < CONFIG['MIN_PIO_COVERAGE']:
             return None
 
-        # --- B. VALORACIÓN (DCF 2-Etapas) ---
-        price = fast.last_price
-        cpx_val = abs(capex.iloc[0]) if not capex.empty else 0
-        fcf = ocf.iloc[0] - cpx_val
+        if piotroski < CONFIG['MIN_PIOTROSKI']:
+            return None
 
-        intrinsic = 0
+        sector = t.info.get("sector", "N/A")
+
+        # --- FCF ---
+        ocf_val = safe_float(ocf.iloc[0]) if not pd.isna(ocf.iloc[0]) else np.nan
+        cpx_val = abs(safe_float(capex.iloc[0])) if (not capex.empty and not pd.isna(capex.iloc[0])) else 0.0
+        fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
+
+        # --- Growth proxy ---
+        growth_proxy = min(roic * 0.5, 0.14)
+        growth_proxy = max(growth_proxy, 0.03)
+
+        # Terminal g por sector
+        terminal_g = TERMINAL_G_BY_SECTOR.get(sector, TERMINAL_G_BY_SECTOR["N/A"])
+
+        # --- DCF ---
+        intrinsic = 0.0
         mos = -0.99
+        tv_weight = np.nan
 
-        if fcf > 0:
-            # Tasa de crecimiento: Proxy basado en ROIC y Reinvestment
-            growth_proxy = min(roic * 0.5, 0.14)  # Max 14%
-            growth_proxy = max(growth_proxy, 0.03)  # Min 3%
+        if (not np.isnan(fcf)) and fcf > 0:
+            r = CONFIG['DISCOUNT_RATE']
 
-            # Stage 1: 5 años
-            future_cash = 0
+            pv_stage1 = 0.0
             for i in range(1, 6):
-                val = fcf * ((1 + growth_proxy) ** i)
-                future_cash += val / ((1 + CONFIG['DISCOUNT_RATE']) ** i)
+                fcf_i = fcf * ((1 + growth_proxy) ** i)
+                pv_stage1 += fcf_i / ((1 + r) ** i)
 
-            # Stage 2: Terminal
+            if r <= terminal_g:
+                return None
+
             terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
-            term_val = (terminal_fcf * 1.03) / (CONFIG['DISCOUNT_RATE'] - 0.03)
-            term_val_pv = term_val / ((1 + CONFIG['DISCOUNT_RATE']) ** 5)
+            tv = (terminal_fcf * (1 + terminal_g)) / (r - terminal_g)
+            pv_tv = tv / ((1 + r) ** 5)
 
-            ev = future_cash + term_val_pv
+            ev = pv_stage1 + pv_tv
             equity_val = ev + curr_cash - curr_debt
-            intrinsic = equity_val / fast.shares
+            intrinsic = equity_val / shares
 
             if intrinsic > 0:
                 mos = (intrinsic - price) / intrinsic
+                tv_weight = pv_tv / ev if ev > 0 else np.nan
 
-        # FILTRO DE SALIDA
+        # filtro salida
         if mos < CONFIG['MARGIN_OF_SAFETY_VIEW'] and piotroski < 7:
             return None
 
-        # Obtener sector
-        try:
-            sector = t.info.get('sector', 'N/A')
-        except:
-            sector = 'N/A'
+        debt_to_mcap = (curr_debt / market_cap) if (market_cap > 0) else np.nan
+        fcf_yield = (fcf / market_cap) if (market_cap > 0 and not np.isnan(fcf)) else np.nan
 
         return {
-            'Ticker': ticker,
-            'Price': round(price, 2),
-            'Sector': sector,
-            'ROIC': roic,
-            'Piotroski': piotroski,
-            'Growth_Est': growth_proxy,
-            'Intrinsic': intrinsic,
-            'MOS': mos
+            "Ticker": ticker,
+            "Price": round(price, 2),
+            "Sector": sector,
+            "ROIC": roic,
+
+            "Piotroski": piotroski,
+            "Piotroski_Coverage": pio_cov,
+
+            "Growth_Est": growth_proxy,
+            "Terminal_g": terminal_g,
+
+            "Intrinsic": intrinsic,
+            "MOS": mos,
+
+            "FCF": fcf,
+            "OCF": ocf_val,
+            "Capex": cpx_val,
+            "Debt": curr_debt,
+            "Cash": curr_cash,
+            "Equity": curr_eq,
+            "InvestedCap": invested_cap,
+            "Shares": shares,
+            "MarketCap": market_cap,
+            "Debt_to_MCap": debt_to_mcap,
+            "FCF_Yield": fcf_yield,
+            "DCF_TV_Weight": tv_weight
         }
 
-    except Exception as e:
-        # Log silencioso de errores individuales
+    except Exception:
         return None
 
 # ==========================================
 # 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
 # ==========================================
 def run_analysis():
-    """
-    Ejecuta el análisis completo con caché
-    AJUSTADO: Lógica idéntica a Colab, estructura de salida mantenida
-    """
+    """Ejecuta el análisis completo con caché"""
     
     # Verificar caché primero
     cached = get_cached_results()
@@ -402,11 +629,11 @@ def run_analysis():
     log("🎯 Iniciando Warren Screener v8")
     log("="*60)
     
-    # 1. Obtener universo (IGUAL que Colab)
+    # 1. Obtener universo
     tickers = get_bulletproof_universe()
     log(f"🎯 Objetivo Real: Analizar {len(tickers)} empresas.")
     
-    # 2. Análisis paralelo (IGUAL que Colab)
+    # 2. Análisis paralelo
     results = []
     with ThreadPoolExecutor(max_workers=CONFIG['MAX_WORKERS']) as executor:
         futures = {executor.submit(analyze_stock_v7, t): t for t in tickers}
@@ -426,16 +653,15 @@ def run_analysis():
         log("❌ Sin resultados finales")
         return error_result
     
-    # 4. Crear DataFrame (IGUAL que Colab)
     df = pd.DataFrame(results)
     df = df.sort_values(by='MOS', ascending=False, na_position='last')
     
-    # 5. Clasificación (IGUAL que Colab)
+    # 4. Clasificación
     buy_candidates = df[df['MOS'] > 0.10].copy() if 'MOS' in df.columns else pd.DataFrame()
     fair_value = df[(df['MOS'] > 0) & (df['MOS'] <= 0.10)].copy() if 'MOS' in df.columns else pd.DataFrame()
     watchlist = df[df['MOS'] <= 0].copy() if 'MOS' in df.columns else pd.DataFrame()
     
-    # 6. Resultado final - MANTENER ESTRUCTURA ACTUAL
+    # 5. Resultado final
     execution_time = round(time.time() - start_time, 2)
     
     # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
@@ -470,7 +696,6 @@ def run_analysis():
     save_to_cache(result)
     
     return result
-
 
 # -------- Flask App --------
 app = Flask(__name__)
