@@ -581,7 +581,7 @@ def analyze_stock_v7(ticker):
 
         return {
             "Ticker": ticker,
-            "Price": round(price, 2),
+            "Price": price,
             "Sector": sector,
             "ROIC": roic,
 
@@ -751,20 +751,6 @@ def analyze():
         log("="*60)
         
         results = run_analysis()
-        
-        # Post-procesamiento automático
-        if POST_PROCESSOR_AVAILABLE and results.get('candidates_count', 0) > 0:
-            try:
-                log("🔄 Ejecutando post-procesamiento...")
-                processor = ResultsPostProcessor(results)
-                processed_data = processor.process_all()
-                
-                # Agregar datos procesados a la respuesta
-                results['post_processed'] = processed_data
-                log("✅ Post-procesamiento completado")
-            except Exception as e:
-                log(f"⚠️  Error en post-procesamiento: {e}")
-                results['post_processed'] = None
         
         response = app.response_class(
             response=json.dumps(results, default=str, allow_nan=False)
