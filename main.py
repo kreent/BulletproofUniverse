@@ -458,18 +458,26 @@ def analyze_stock_v7(ticker):
             fast = t.fast_info
             market_cap = safe_float(getattr(fast, "market_cap", np.nan))
             if np.isnan(market_cap) or market_cap < 5_000_000_000:
+                if ticker == "PFG":
+                    log(f"❌ PFG rejected: market_cap filter (${market_cap:,.0f})")
                 return None
             price = safe_float(getattr(fast, "last_price", np.nan))
             shares = safe_float(getattr(fast, "shares", np.nan))
             if np.isnan(price) or price <= 0 or np.isnan(shares) or shares <= 0:
+                if ticker == "PFG":
+                    log(f"❌ PFG rejected: price/shares filter (price=${price}, shares={shares})")
                 return None
-        except:
+        except Exception as e:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: fast_info error ({e})")
             return None
 
         inc = t.income_stmt
         bal = t.balance_sheet
         cf  = t.cashflow
         if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: empty statements (inc={inc is not None and not inc.empty}, bal={bal is not None and not bal.empty}, cf={cf is not None and not cf.empty})")
             return None
 
         # Orden cronológico (más reciente primero)
@@ -507,6 +515,8 @@ def analyze_stock_v7(ticker):
         ])
 
         if ni.empty or ocf.empty or equity.empty:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: empty series (ni={not ni.empty}, ocf={not ocf.empty}, equity={not equity.empty})")
             return None
 
         # --- valores actuales ---
@@ -518,6 +528,8 @@ def analyze_stock_v7(ticker):
         invested_cap = curr_eq + curr_debt - curr_cash
         roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0.0
         if roic < CONFIG['MIN_ROIC']:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: ROIC filter ({roic:.1%} < {CONFIG['MIN_ROIC']:.1%})")
             return None
 
         # ✅ Piotroski REAL (0-9) + coverage
@@ -525,9 +537,13 @@ def analyze_stock_v7(ticker):
 
         # Si coverage es bajo, no confiamos
         if pio_cov < CONFIG['MIN_PIO_COVERAGE']:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: Piotroski coverage filter (coverage={pio_cov} < {CONFIG['MIN_PIO_COVERAGE']})")
             return None
 
         if piotroski < CONFIG['MIN_PIOTROSKI']:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: Piotroski score filter (score={piotroski} < {CONFIG['MIN_PIOTROSKI']})")
             return None
 
         sector = t.info.get("sector", "N/A")
@@ -558,6 +574,8 @@ def analyze_stock_v7(ticker):
                 pv_stage1 += fcf_i / ((1 + r) ** i)
 
             if r <= terminal_g:
+                if ticker == "PFG":
+                    log(f"❌ PFG rejected: terminal_g >= discount rate (r={r}, terminal_g={terminal_g})")
                 return None
 
             terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
@@ -574,10 +592,15 @@ def analyze_stock_v7(ticker):
 
         # filtro salida
         if mos < CONFIG['MARGIN_OF_SAFETY_VIEW'] and piotroski < 7:
+            if ticker == "PFG":
+                log(f"❌ PFG rejected: final MOS filter (MOS={mos:.1%} < {CONFIG['MARGIN_OF_SAFETY_VIEW']:.1%} AND Piotroski={piotroski} < 7)")
             return None
 
         debt_to_mcap = (curr_debt / market_cap) if (market_cap > 0) else np.nan
         fcf_yield = (fcf / market_cap) if (market_cap > 0 and not np.isnan(fcf)) else np.nan
+
+        if ticker == "PFG":
+            log(f"✅ PFG PASSED! ROIC={roic:.1%}, Piotroski={piotroski}/{pio_cov}, MOS={mos:.1%}")
 
         return {
             "Ticker": ticker,
@@ -608,7 +631,11 @@ def analyze_stock_v7(ticker):
             "DCF_TV_Weight": tv_weight
         }
 
-    except Exception:
+    except Exception as e:
+        if ticker == "PFG":
+            log(f"❌ PFG exception: {e}")
+            import traceback
+            traceback.print_exc()
         return None
 
 # ==========================================
@@ -664,13 +691,14 @@ def run_analysis():
     # 5. Resultado final
     execution_time = round(time.time() - start_time, 2)
     
-    # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
-    all_results = df.replace({np.nan: None}).to_dict('records')
+    # ✅ IGUAL QUE COLAB: Solo devolver top 30 (df.head(30))
+    top_30_df = df.head(30)
+    top_30_results = top_30_df.replace({np.nan: None}).to_dict('records')
     
     result = {
         "total_analyzed": len(tickers),
-        "candidates_count": len(df),
-        "results": all_results,  # TODOS los resultados, ordenados por MOS descendente
+        "candidates_count": len(df),  # Total de candidatos encontrados
+        "results": top_30_results,     # ✅ Solo TOP 30, igual que Colab
         "summary": {
             "buy_zone_count": len(buy_candidates),      # MOS > 10%
             "fair_zone_count": len(fair_value),         # MOS 0-10%
@@ -683,7 +711,7 @@ def run_analysis():
     }
     
     log("="*60)
-    log(f"💎 RESULTADOS FINALES ({len(df)} encontrados):")
+    log(f"💎 RESULTADOS FINALES ({len(df)} encontrados, mostrando top 30):")
     log(f"📊 Total analizados: {len(tickers)}")
     log(f"⭐ Candidatos finales: {len(df)}")
     log(f"   🟢 Zona de Compra (MOS > 10%): {len(buy_candidates)}")
