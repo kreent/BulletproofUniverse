@@ -40,20 +40,8 @@ chmod +x deploy.sh
 
 ### 1. `/analyze` - Análisis principal
 ```bash
-# Análisis con configuración por defecto
 curl https://TU_URL/analyze
-
-# Análisis con configuración personalizada (opcional)
-curl "https://TU_URL/analyze?min_roic=0.10&min_piotroski=6&discount_rate=0.12"
 ```
-
-**Parámetros opcionales (query string):**
-- `min_roic`: ROIC mínimo (default: 0.08 = 8%)
-- `min_piotroski`: Piotroski Score mínimo (default: 5)
-- `discount_rate`: Tasa de descuento DCF (default: 0.09 = 9%)
-- `margin_of_safety_view`: MOS mínimo para watchlist (default: -0.20 = -20%)
-
-**Nota:** Si usas parámetros personalizados, el caché se omite y se ejecuta análisis completo.
 
 **Respuesta (primera vez, sin caché):**
 ```json
@@ -202,62 +190,24 @@ El caché reduce drásticamente el costo porque:
 
 ## 🔧 Configuración Avanzada
 
-### Cambiar parámetros de análisis
+### Cambiar duración del caché
 
-**Opción 1: Editar portfolio_analyzer.py (permanente)**
-
-Edita `portfolio_analyzer.py`, alrededor de la línea 20:
+Edita `main.py`, línea 30:
 ```python
-# Configuración por defecto en la clase WarrenScreener
-self.config = config or {
+CACHE_TTL_HOURS = 24  # Cambiar a 12, 48, etc.
+```
+
+### Ajustar filtros de calidad
+
+Edita `main.py`, líneas 42-47:
+```python
+CONFIG = {
     'MAX_WORKERS': 12,
     'MIN_ROIC': 0.08,              # 8% -> ajusta a 10%, 12%, etc.
     'MIN_PIOTROSKI': 5,            # 5 -> ajusta a 6, 7, etc.
     'DISCOUNT_RATE': 0.09,         # 9% -> ajusta según tu perfil
     'MARGIN_OF_SAFETY_VIEW': -0.20 # -20% -> más estricto: 0%
 }
-```
-
-**Opción 2: Query params en API (temporal)**
-
-```bash
-# Análisis más agresivo (ROIC 6%, Piotroski 4)
-curl "https://TU_URL/analyze?min_roic=0.06&min_piotroski=4"
-
-# Análisis más conservador (ROIC 12%, Piotroski 7)
-curl "https://TU_URL/analyze?min_roic=0.12&min_piotroski=7"
-
-# Tasa de descuento personalizada (15%)
-curl "https://TU_URL/analyze?discount_rate=0.15"
-```
-
-**Opción 3: Programáticamente (si usas Python directamente)**
-
-```python
-from portfolio_analyzer import analyze_portfolio
-
-custom_config = {
-    'MAX_WORKERS': 8,
-    'MIN_ROIC': 0.10,      # 10% mínimo
-    'MIN_PIOTROSKI': 6,    # Solo alta calidad
-    'DISCOUNT_RATE': 0.12, # Más conservador
-    'MARGIN_OF_SAFETY_VIEW': 0.0  # Solo MOS positivo
-}
-
-results = analyze_portfolio(custom_config)
-```
-
-### Cambiar duración del caché
-
-Edita `main.py`, línea 54:
-```python
-CACHE_TTL_HOURS = 24  # Cambiar a 12, 48, etc.
-```
-
-Después, rebuild y redeploy:
-```bash
-gcloud builds submit --tag gcr.io/TU_PROJECT_ID/warren-screener
-gcloud run deploy warren-screener --image gcr.io/TU_PROJECT_ID/warren-screener --region us-central1
 ```
 
 ### Actualización automática diaria
@@ -273,45 +223,6 @@ gcloud scheduler jobs create http warren-daily-update \
 
 ## 🐛 Troubleshooting
 
-### ❌ Caché corrupto - 0 resultados retornados
-
-**Síntoma más común:**
-```json
-{
-  "candidates_count": 0,
-  "from_cache": true,
-  "results": []
-}
-```
-
-**Causa:** El caché contiene resultados de una ejecución que falló (Yahoo Finance bloqueado, timeout, etc.).
-
-**Solución inmediata:**
-```bash
-# Opción 1: Script automático
-./force_reanalysis.sh
-
-# Opción 2: Comandos manuales
-curl https://TU_URL/clear-cache
-sleep 2
-curl https://TU_URL/analyze  # Tomará ~4 minutos
-```
-
-**Verificación:**
-```bash
-# Ver estado del caché
-curl https://TU_URL/cache-status
-
-# Diagnóstico (prueba con AAPL)
-curl https://TU_URL/diagnose
-```
-
-**⚠️ IMPORTANTE:** Después de cada deploy, limpia el caché si sospechas problemas.
-
-📚 **Ver [TROUBLESHOOTING.md](TROUBLESHOOTING.md) para guía completa de debugging**
-
----
-
 ### Sin resultados o muy pocos
 
 **Posibles causas:**
@@ -319,22 +230,12 @@ curl https://TU_URL/diagnose
 2. **Rate limiting de Yahoo Finance** → Espera 1 hora y reintenta
 3. **Mercado muy caro** → Normal en bull markets
 
-**Solución - Opción 1 (vía API, temporal):**
-```bash
-# Análisis más permisivo
-curl "https://TU_URL/analyze?min_roic=0.06&min_piotroski=4&margin_of_safety_view=-0.30"
-```
-
-**Solución - Opción 2 (permanente):**
+**Solución:**
 ```python
-# En portfolio_analyzer.py, modifica config por defecto:
-self.config = config or {
-    'MAX_WORKERS': 12,
-    'MIN_ROIC': 0.06,           # Baja a 6%
-    'MIN_PIOTROSKI': 4,         # Baja a 4
-    'DISCOUNT_RATE': 0.09,
-    'MARGIN_OF_SAFETY_VIEW': -0.30  # Muestra hasta -30%
-}
+# En main.py, líneas 42-47, relaja filtros temporalmente:
+'MIN_ROIC': 0.06,           # Baja a 6%
+'MIN_PIOTROSKI': 4,         # Baja a 4
+'MARGIN_OF_SAFETY_VIEW': -0.30  # Muestra hasta -30%
 ```
 
 ### Error de permisos en Cloud Storage
@@ -364,15 +265,16 @@ gcloud run deploy warren-screener \
 
 ```
 .
-├── main.py                  # Flask API + Cache management
-├── portfolio_analyzer.py    # Core del Warren Screener (análisis DCF)
-├── portfolio_refiner.py     # Portfolio Manager Review
-├── post_processor.py        # Post-procesamiento de resultados
-├── portfolio_tracker.py     # Performance tracking
-├── requirements.txt         # Dependencias Python
-├── Dockerfile              # Configuración Docker
-├── deploy.sh               # Script de despliegue automático
-└── README.md               # Este archivo
+├── main.py              # API Flask con endpoints REST
+├── portfolio_analyzer.py # Motor de análisis DCF + Cache Manager
+├── portfolio_refiner.py  # Refinador de growth por sector
+├── portfolio_tracker.py  # Tracker de rendimiento de portfolio
+├── post_processor.py     # Post-procesamiento y alertas
+├── requirements.txt     # Dependencias Python
+├── Dockerfile          # Configuración Docker
+├── deploy.sh           # Script de despliegue automático
+├── test_cache.sh       # Script de pruebas
+└── README.md           # Este archivo
 ```
 
 ## ✨ Características v8.0
