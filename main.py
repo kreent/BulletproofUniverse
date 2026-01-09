@@ -65,7 +65,7 @@ except Exception as e:
     bucket = None
 
 # ==========================================
-# ⚙️ CONFIG - Oracle V7.2
+# ⚙️ PARÁMETROS DE CAZA (AJUSTADOS)
 # ==========================================
 CONFIG = {
     "MAX_WORKERS": 12,
@@ -94,6 +94,7 @@ TERMINAL_G_BY_SECTOR = {
     "Financial Services": 0.020,
     "N/A": 0.020
 }
+
 
 def log(msg):
     print(msg)
@@ -247,15 +248,47 @@ def get_bulletproof_universe():
     # Intento 3: Lista de Respaldo MANUAL COMPLETA
     # Lista actualizada con TODOS los tickers que aparecen en Colab
     BACKUP_LIST = [
-        'AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA','BRK-B','LLY','V',
-        'TSM','UNH','AVGO','JPM','NVO','WMT','XOM','MA','JNJ','PG',
-        'HD','MRK','COST','ABBV','ORCL','ASML','CVX','ADBE','AMD','KO',
-        'PEP','CRM','BAC','ACN','CSCO','NFLX','MCD','LIN','AZN','NKE',
-        'DIS','TMUS','ABT','DHR','WFC','INTC','INTU','QCOM','CMCSA','TXN',
-        'VZ','UPS','PM','NEE','RTX','MS','HON','AMGN','UNP','PFE',
-        'LOW','SPGI','CAT','IBM','AMAT','DE','GS','GE','LMT','PLD',
-        'BLK','SYK','T','ISRG','BKNG','ELV','MDT','TJX','ADI','NOW',
-        'MMC','CVS','ADP','VRTX','LRCX','UBER','REGN','PYPL','ZTS','CI'
+        # Originales (90 tickers)
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
+        'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
+        'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
+        'PEP', 'CRM', 'BAC', 'ACN', 'CSCO', 'NFLX', 'MCD', 'LIN', 'AZN', 'NKE',
+        'DIS', 'TMUS', 'ABT', 'DHR', 'WFC', 'INTC', 'INTU', 'QCOM', 'CMCSA', 'TXN',
+        'VZ', 'UPS', 'PM', 'NEE', 'RTX', 'MS', 'HON', 'AMGN', 'UNP', 'PFE',
+        'LOW', 'SPGI', 'CAT', 'IBM', 'AMAT', 'DE', 'GS', 'GE', 'LMT', 'PLD',
+        'BLK', 'SYK', 'T', 'ISRG', 'BKNG', 'ELV', 'MDT', 'TJX', 'ADI', 'NOW',
+        'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI',
+        # Agregados - Los que salen en Colab pero faltaban
+        'MET', 'AMP', 'KMB', 'FCX', 'CLX', 'IT', 'BIIB', 'CL', 'ZBRA', 'WSM',
+        'MKTX', 'LII', 'FDS', 'RL', 'HAS',
+        # Más del S&P 500 para completar
+        'GOOG', 'BRK-A', 'AVGO', 'TSLA', 'JPM', 'UNH', 'LLY', 'XOM', 'V', 'PG',
+        'JNJ', 'MA', 'NVDA', 'HD', 'ABBV', 'MRK', 'COST', 'CVX', 'ADBE', 'PEP',
+        'KO', 'TMO', 'CSCO', 'ACN', 'MCD', 'ABT', 'NFLX', 'WFC', 'ORCL', 'CRM',
+        'DHR', 'TXN', 'AMD', 'CMCSA', 'QCOM', 'INTU', 'NKE', 'VZ', 'PM', 'UPS',
+        'NEE', 'RTX', 'HON', 'AMGN', 'LOW', 'SPGI', 'BMY', 'SBUX', 'BA', 'CAT',
+        'GS', 'IBM', 'AXP', 'ISRG', 'GILD', 'BLK', 'DE', 'ELV', 'MDT', 'SCHW',
+        'AMAT', 'SYK', 'PLD', 'LMT', 'ADI', 'BKNG', 'VRTX', 'TJX', 'REGN', 'ADP',
+        'MDLZ', 'CB', 'NOW', 'LRCX', 'MO', 'AMT', 'MMC', 'PYPL', 'PGR', 'SO',
+        'CI', 'DUK', 'ETN', 'BSX', 'SLB', 'ZTS', 'GE', 'EQIX', 'PNC', 'NOC',
+        'USB', 'TGT', 'ITW', 'REGN', 'BDX', 'MU', 'HCA', 'MS', 'WELL', 'KLAC',
+        'EOG', 'C', 'MMM', 'APH', 'FI', 'MCK', 'WM', 'PH', 'SNPS', 'CDNS',
+        'SHW', 'CMG', 'MAR', 'TDG', 'EMR', 'NSC', 'APD', 'MSI', 'NXPI', 'CARR',
+        'PSX', 'ADSK', 'CSX', 'CME', 'COP', 'MPC', 'TT', 'AJG', 'MCO', 'GM',
+        'AFL', 'ROP', 'PCAR', 'O', 'MCHP', 'SRE', 'HUM', 'ORLY', 'AZO', 'PAYX',
+        'D', 'ICE', 'MSCI', 'FTNT', 'KMB', 'ROST', 'ECL', 'AIG', 'TRV', 'CCI',
+        'JCI', 'TEL', 'CPRT', 'AEP', 'CL', 'HSY', 'GWW', 'PSA', 'MNST', 'KMI',
+        'EW', 'FAST', 'BK', 'CTAS', 'FCX', 'NEM', 'ALL', 'ODFL', 'DLR', 'EXC',
+        'SPG', 'CMI', 'IQV', 'KHC', 'CTVA', 'YUM', 'EA', 'XEL', 'GIS', 'VRSK',
+        'AME', 'DXCM', 'HLT', 'KVUE', 'PCG', 'DD', 'OTIS', 'RSG', 'IDXX', 'A',
+        'ANSS', 'VICI', 'VMC', 'MLM', 'BKR', 'KEYS', 'CTSH', 'IT', 'WMB', 'ROK',
+        'EXR', 'OKE', 'RMD', 'PPG', 'DOV', 'GEHC', 'AVB', 'BIIB', 'FICO', 'SYY',
+        'EIX', 'ED', 'CBRE', 'TROW', 'MTD', 'IRM', 'DAL', 'ALNY', 'HAL', 'ACGL',
+        'MPWR', 'WEC', 'WSM', 'XYL', 'FTV', 'GLW', 'WBD', 'FITB', 'IR', 'CHTR',
+        'CDW', 'HPQ', 'TSCO', 'AWK', 'DTE', 'ES', 'CAH', 'PPL', 'FDS', 'ETR',
+        'LH', 'GPN', 'CHD', 'EBAY', 'KEYS', 'RF', 'MTB', 'HPE', 'RL', 'ZBRA',
+        'TTWO', 'NTAP', 'STT', 'BALL', 'CLX', 'HAS', 'LUV', 'UAL', 'MKTX',
+        'LII', 'AMP', 'MET', 'ULTA', 'APTV', 'STE', 'DFS', 'CFG', 'INVH', 'HBAN'
     ]
 
     if len(tickers) < 50:
@@ -272,25 +305,23 @@ def get_bulletproof_universe():
 # ==========================================
 def get_fuzzy_series(df, keywords):
     """Búsqueda fuzzy de campos en DataFrames financieros"""
-    if df is None or df.empty:
+    if df.empty: 
         return pd.Series(dtype=float)
     
-    df = df.copy()
     df.index = df.index.astype(str).str.lower().str.strip()
     
     for key in keywords:
-        k = key.lower()
-        if k in df.index:
-            return df.loc[k]
-        matches = [i for i in df.index if k in i]
-        if matches:
+        key = key.lower()
+        if key in df.index: 
+            return df.loc[key]
+        matches = [idx for idx in df.index if key in idx]
+        if matches: 
             return df.loc[min(matches, key=len)]
     
     return pd.Series(dtype=float)
 
-
 # ==========================================
-# 3. SAFE FLOAT Y UTILIDADES (Oracle V7.2)
+# 3. REAL PIOTROSKI (0–9) + COVERAGE
 # ==========================================
 def safe_float(x):
     try:
@@ -309,9 +340,6 @@ def get_latest_and_prev(series: pd.Series):
     b = safe_float(series.iloc[1]) if len(series) > 1 else np.nan
     return a, b
 
-# ==========================================
-# 4. REAL PIOTROSKI (0–9) + COVERAGE (Oracle V7.2)
-# ==========================================
 def compute_piotroski_fscore(inc, bal, cf):
     """
     Piotroski F-Score real (0-9).
@@ -416,10 +444,9 @@ def compute_piotroski_fscore(inc, bal, cf):
     return score, covered
 
 # ==========================================
-# 5. ANÁLISIS FINANCIERO (Oracle V7.2)
+# 4) ANALYZE STOCK (V7.2) - mantiene salida del endpoint
 # ==========================================
 def analyze_stock_v7(ticker):
-    """Analiza una acción individual con Oracle V7.2"""
     try:
         t = yf.Ticker(ticker)
 
@@ -517,7 +544,6 @@ def analyze_stock_v7(ticker):
         # --- DCF ---
         intrinsic = 0.0
         mos = -0.99
-        tv_weight = np.nan
 
         if (not np.isnan(fcf)) and fcf > 0:
             r = CONFIG["DISCOUNT_RATE"]
@@ -540,45 +566,30 @@ def analyze_stock_v7(ticker):
 
             if intrinsic > 0:
                 mos = (intrinsic - price) / intrinsic
-                tv_weight = pv_tv / ev if ev > 0 else np.nan
 
         # filtro salida
         if mos < CONFIG["MARGIN_OF_SAFETY_VIEW"] and piotroski < 7:
             return None
 
-        debt_to_mcap = (curr_debt / market_cap) if (market_cap > 0) else np.nan
-        fcf_yield = (fcf / market_cap) if (market_cap > 0 and not np.isnan(fcf)) else np.nan
-
+        # ✅ mantener misma salida que antes (campos principales)
         return {
-            "Ticker": ticker,
-            "Price": round(price, 2),
-            "Sector": sector,
-            "ROIC": roic,
-            "Piotroski": piotroski,
-            "Piotroski_Coverage": pio_cov,
-            "Growth_Est": growth_proxy,
-            "Terminal_g": terminal_g,
-            "Intrinsic": intrinsic,
-            "MOS": mos,
-            "FCF": fcf,
-            "OCF": ocf_val,
-            "Capex": cpx_val,
-            "Debt": curr_debt,
-            "Cash": curr_cash,
-            "Equity": curr_eq,
-            "InvestedCap": invested_cap,
-            "Shares": shares,
-            "MarketCap": market_cap,
-            "Debt_to_MCap": debt_to_mcap,
-            "FCF_Yield": fcf_yield,
-            "DCF_TV_Weight": tv_weight
+            'Ticker': ticker,
+            'Price': round(price, 2),
+            'Sector': sector,
+            'ROIC': roic,
+            'Piotroski': piotroski,
+            'Growth_Est': growth_proxy,
+            'Intrinsic': intrinsic,
+            'MOS': mos
         }
 
     except Exception:
         return None
 
+
 # ==========================================
-# 6. FUNCIÓN PRINCIPAL DE ANÁLISIS
+
+# 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
 # ==========================================
 def run_analysis():
     """Ejecuta el análisis completo con caché"""
@@ -672,28 +683,26 @@ def home():
     cache_status = "enabled" if GCS_AVAILABLE else "disabled"
     return jsonify({
         "status": "Warren Screener v8 - DCF 2-Stage + Quality Focus",
-        "version": "8.0 - Oracle V7.2 Integration",
+        "version": "8.0",
         "cache": cache_status,
         "bucket": GCS_BUCKET_NAME if GCS_AVAILABLE else "not configured",
         "cache_ttl_hours": CACHE_TTL_HOURS,
         "methodology": [
             "ROIC mínimo 8% (retorno sobre capital invertido)",
-            "Piotroski Score >= 6 (calidad financiera REAL con 9 señales)",
+            "Piotroski Score >= 5 (calidad financiera)",
             "DCF 2-Stage con tasa de descuento 9%",
             "Growth estimado basado en ROIC",
-            "Terminal growth ajustado por sector",
             "Margen de seguridad calculado vs precio actual"
         ],
         "filters": {
             "min_market_cap": "5B USD",
             "min_roic": f"{CONFIG['MIN_ROIC']*100}%",
             "min_piotroski": CONFIG['MIN_PIOTROSKI'],
-            "min_pio_coverage": CONFIG['MIN_PIO_COVERAGE'],
             "discount_rate": f"{CONFIG['DISCOUNT_RATE']*100}%"
         },
         "endpoints": {
             "/analyze": "Run analysis (with 24h cache + auto post-processing)",
-            "/refine": "GET - Analyst AI V7: Portfolio Analysis + Exit Plan (6M/12M targets)",
+            "/refine": "GET - Portfolio Manager Review (adjust growth by sector)",
             "/follow": "POST - Portfolio Performance Tracker (analyze your portfolio)",
             "/post-process": "POST - Manual post-processing of results",
             "/cache-status": "Check cache status",
@@ -827,7 +836,7 @@ def health():
         "post_processor_available": POST_PROCESSOR_AVAILABLE,
         "portfolio_refiner_available": PORTFOLIO_REFINER_AVAILABLE,
         "portfolio_tracker_available": PORTFOLIO_TRACKER_AVAILABLE,
-        "version": "8.0 - Oracle V7.2 + Analyst AI V7 Integration"
+        "version": "8.0 - DCF 2-Stage + Quality + Portfolio Manager + Tracker"
     })
 
 @app.route('/post-process', methods=['POST'])
@@ -955,307 +964,20 @@ def follow_endpoint():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 7. ANALYST AI V7 (Analyst + Exit Plan)
-# ==========================================
-def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataFrame:
-    """
-    Selecciona SOLO oportunidades de alta convicción ("JOYAS"),
-    con gates estrictos y lógica anti-trampas (especialmente DEFENSIVE).
-
-    - No usa Top N. Pasa/falla por umbrales.
-    - Por defecto devuelve SOLO STRONG BUY / BUY.
-    - return_all=True devuelve WATCH/AVOID también.
-    """
-
-    required_cols = [
-        "Ticker","Price","Sector","ROIC","Piotroski","Growth_Est","Terminal_g",
-        "Intrinsic","MOS","FCF","Debt","Cash","MarketCap","Debt_to_MCap","FCF_Yield","DCF_TV_Weight"
-    ]
-    missing = [c for c in required_cols if c not in df_input.columns]
-    if missing:
-        raise ValueError(f"Faltan columnas requeridas en el df de entrada: {missing}")
-
-    df = df_input.copy()
-
-    # Normalización numérica
-    num_cols = [
-        "Price","ROIC","Piotroski","Growth_Est","Terminal_g","Intrinsic","MOS",
-        "FCF","Debt","Cash","MarketCap","Debt_to_MCap","FCF_Yield","DCF_TV_Weight"
-    ]
-    for c in num_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce").replace([np.inf, -np.inf], np.nan)
-
-    df["Sector"] = df["Sector"].fillna("N/A").astype(str)
-    df["Ticker"] = df["Ticker"].astype(str)
-
-    # Buckets sectoriales
-    DEFENSIVE = {"Consumer Defensive","Utilities","Healthcare"}
-    CYCLICAL  = {"Consumer Cyclical","Industrials","Basic Materials","Energy","Real Estate"}
-    GROWTH    = {"Technology","Communication Services"}
-
-    def sector_bucket(sector: str) -> str:
-        if sector in DEFENSIVE: return "DEFENSIVE"
-        if sector in CYCLICAL:  return "CYCLICAL"
-        if sector in GROWTH:    return "GROWTH"
-        return "OTHER"
-
-    # Dedup por issuer (clases)
-    def issuer_key(ticker: str) -> str:
-        t = ticker.upper()
-        for suf in ["-A","-B","-C",".A",".B",".C"]:
-            if t.endswith(suf):
-                t = t[: -len(suf)]
-        if t in {"FOXA","FOX"}: return "FOX"
-        if t in {"GOOGL","GOOG"}: return "GOOG"
-        return t
-
-    # Config institucional (estricta)
-    CFG = {
-        "MIN_PIO_BUY": 6,
-        "MIN_PIO_STRONG": 7,
-        "MIN_ROIC_BUY": 0.10,
-        "MIN_ROIC_STRONG": 0.12,
-
-        "MAX_TVW_BUY": 0.80,
-        "MAX_TVW_STRONG": 0.77,
-
-        "MAX_DTM_BUY": 1.0,
-        "MAX_DTM_STRONG": 0.9,
-
-        "MOS_BUY":    {"DEFENSIVE":0.36, "CYCLICAL":0.34, "GROWTH":0.30, "OTHER":0.32},
-        "MOS_STRONG": {"DEFENSIVE":0.44, "CYCLICAL":0.42, "GROWTH":0.38, "OTHER":0.40},
-
-        "FCFY_BUY":    {"DEFENSIVE":0.085, "CYCLICAL":0.055, "GROWTH":0.045, "OTHER":0.055},
-        "FCFY_STRONG": {"DEFENSIVE":0.100, "CYCLICAL":0.065, "GROWTH":0.055, "OTHER":0.065},
-
-        "UP_BUY": 0.55,
-        "UP_STRONG": 0.85,
-
-        "DEF_MAX_GROWTH_EST": 0.10,
-        "REQUIRE_POSITIVE_FCF": True,
-    }
-
-    def mos_penalty(dtm, tvw):
-        pen = 0.0
-        if not pd.isna(dtm):
-            if dtm >= 1.2: pen += 0.06
-            elif dtm >= 1.0: pen += 0.03
-        if not pd.isna(tvw):
-            if tvw >= 0.85: pen += 0.07
-            elif tvw >= 0.80: pen += 0.04
-        return pen
-
-    out = []
-    for _, r in df.iterrows():
-        ticker = r["Ticker"]
-        sector = r["Sector"]
-        bucket = sector_bucket(sector)
-
-        price = r["Price"]
-        fair  = r["Intrinsic"]  # ← fair value DCF
-
-        roic = r["ROIC"]
-        pio  = r["Piotroski"]
-        fcf  = r["FCF"]
-        fcfy = r["FCF_Yield"]
-        dtm  = r["Debt_to_MCap"]
-        tvw  = r["DCF_TV_Weight"]
-        g_est = r["Growth_Est"]
-        t_g   = r["Terminal_g"]
-
-        # Financieras fuera de DCF
-        if sector == "Financial Services":
-            if return_all:
-                out.append({
-                    "Ticker": ticker, "Issuer": issuer_key(ticker), "Sector": sector, "Bucket": bucket,
-                    "Price": price, "Target_Fair": np.nan, "Upside": np.nan, "Real_MOS": np.nan,
-                    "Action": "VALUAR P/B", "Cat": "🏦 Banco/Seguro",
-                    "Flags": "DCF_NA",
-                    "Why": "Bancos/seguros: usar P/B + ROE + calidad de balance.",
-                    "DCF_TV_Weight": tvw, "Debt_to_MCap": dtm, "FCF_Yield": fcfy, "Piotroski": pio, "ROIC": roic
-                })
-            continue
-
-        # sanity
-        if pd.isna(price) or pd.isna(fair) or price <= 0 or fair <= 0:
-            continue
-
-        upside = (fair - price) / price
-        real_mos = (fair - price) / fair
-
-        flags, why = [], []
-
-        # FCF positivo obligatorio
-        fcf_ok = (not pd.isna(fcf)) and (fcf > 0)
-        if CFG["REQUIRE_POSITIVE_FCF"] and (not fcf_ok):
-            flags.append("FCF_NEG")
-
-        mos_req_buy    = CFG["MOS_BUY"][bucket]    + mos_penalty(dtm, tvw)
-        mos_req_strong = CFG["MOS_STRONG"][bucket] + mos_penalty(dtm, tvw)
-
-        fcfy_req_buy    = CFG["FCFY_BUY"][bucket]
-        fcfy_req_strong = CFG["FCFY_STRONG"][bucket]
-
-        # Anti-trampa defensivos
-        defensive_trap = False
-        if bucket == "DEFENSIVE":
-            if (not pd.isna(g_est)) and (g_est > CFG["DEF_MAX_GROWTH_EST"]):
-                defensive_trap = True
-                flags.append("DEF_GROWTH_IMPLAUSIBLE")
-            if (not pd.isna(pio)) and (pio <= 5):
-                defensive_trap = True
-                flags.append("DEF_LOW_PIO")
-            if (pd.isna(fcfy)) or (fcfy < fcfy_req_buy):
-                flags.append("DEF_FCFY_LOW")
-
-        # Fragilidad DCF
-        if (not pd.isna(tvw)) and (tvw > 0.85):
-            flags.append("TV_HEAVY")
-
-        base_ok_buy = (
-            (not pd.isna(pio)) and (pio >= CFG["MIN_PIO_BUY"]) and
-            (not pd.isna(roic)) and (roic >= CFG["MIN_ROIC_BUY"]) and
-            (not pd.isna(fcfy)) and (fcfy >= fcfy_req_buy) and
-            (not pd.isna(dtm)) and (dtm <= CFG["MAX_DTM_BUY"]) and
-            (not pd.isna(tvw)) and (tvw <= CFG["MAX_TVW_BUY"]) and
-            fcf_ok and
-            (real_mos >= mos_req_buy) and
-            (upside >= CFG["UP_BUY"]) and
-            (not defensive_trap)
-        )
-
-        base_ok_strong = (
-            (not pd.isna(pio)) and (pio >= CFG["MIN_PIO_STRONG"]) and
-            (not pd.isna(roic)) and (roic >= CFG["MIN_ROIC_STRONG"]) and
-            (not pd.isna(fcfy)) and (fcfy >= fcfy_req_strong) and
-            (not pd.isna(dtm)) and (dtm <= CFG["MAX_DTM_STRONG"]) and
-            (not pd.isna(tvw)) and (tvw <= CFG["MAX_TVW_STRONG"]) and
-            fcf_ok and
-            (real_mos >= mos_req_strong) and
-            (upside >= CFG["UP_STRONG"]) and
-            (not defensive_trap)
-        )
-
-        action, cat = "AVOID", "❌ No pasa filtros"
-        if base_ok_strong:
-            action, cat = "STRONG BUY", "💎 JOYA REAL"
-            why.append("Pasa gates estrictos (calidad + robustez + riesgo controlado).")
-        elif base_ok_buy:
-            action, cat = "BUY", "✅ Oportunidad"
-            why.append("Pasa gates institucionales (MOS/FCFY + riesgo controlado).")
-        else:
-            if (real_mos >= 0.18) and (upside >= 0.30):
-                action, cat = "WATCH", "⚖️ Casi, pero no"
-                why.append("Hay descuento, pero no alcanza robustez/calidad/riesgo para compra.")
-
-        if (not return_all) and (action not in {"STRONG BUY","BUY"}):
-            continue
-
-        out.append({
-            "Ticker": ticker,
-            "Issuer": issuer_key(ticker),
-            "Sector": sector,
-            "Bucket": bucket,
-            "Price": price,
-            "Target_Fair": fair,
-            "Upside": upside,
-            "Real_MOS": real_mos,
-            "Piotroski": pio,
-            "ROIC": roic,
-            "FCF_Yield": fcfy,
-            "Debt_to_MCap": dtm,
-            "DCF_TV_Weight": tvw,
-            "Growth_Est": g_est,
-            "Terminal_g": t_g,
-            "Action": action,
-            "Cat": cat,
-            "Flags": ",".join(sorted(set(flags))),
-            "Why": " ".join(why) if why else ""
-        })
-
-    res = pd.DataFrame(out)
-    if res.empty:
-        return res
-
-    # Dedup por issuer: mejor acción, luego upside
-    action_rank = {"STRONG BUY": 0, "BUY": 1, "WATCH": 2, "AVOID": 3, "VALUAR P/B": 4}
-    res["_ar"] = res["Action"].map(action_rank).fillna(99)
-    res = res.sort_values(by=["_ar","Upside"], ascending=[True, False])
-    res = res.drop_duplicates(subset=["Issuer"], keep="first").drop(columns=["_ar"])
-
-    # Orden final
-    res["_ar2"] = res["Action"].map(action_rank).fillna(99)
-    res = res.sort_values(by=["_ar2","Upside"], ascending=[True, False]).drop(columns=["_ar2"])
-
-    return res
-
-def add_exit_plan(df_rec: pd.DataFrame) -> pd.DataFrame:
-    """
-    Construye targets de salida realistas (6m y 12m) usando convergencia parcial al fair value,
-    penalizando fragilidad del DCF (TV weight alto). Agrega trim y stop.
-    """
-    if df_rec is None or df_rec.empty:
-        return df_rec
-
-    dfp = df_rec.copy()
-
-    price = pd.to_numeric(dfp["Price"], errors="coerce")
-    fair  = pd.to_numeric(dfp["Target_Fair"], errors="coerce")
-    tvw   = pd.to_numeric(dfp["DCF_TV_Weight"], errors="coerce")
-
-    # Penalización por TV weight (fragilidad del fair)
-    # (mientras más TVW, más conservador el target)
-    tv_penalty = np.where(tvw >= 0.78, 0.90, np.where(tvw >= 0.74, 0.95, 1.00))
-    dfp["TV_Penalty"] = tv_penalty
-
-    gap = (fair - price).clip(lower=0)
-
-    # Convergencia parcial por horizonte y tipo de acción
-    # 6m: más conservador
-    conv6 = np.where(dfp["Action"].eq("STRONG BUY"), 0.60,
-            np.where(dfp["Action"].eq("BUY"),        0.45, 0.40))
-    # 12m: más "tesis"
-    conv12 = np.where(dfp["Action"].eq("STRONG BUY"), 0.80,
-             np.where(dfp["Action"].eq("BUY"),        0.65, 0.55))
-
-    dfp["Conv_6M"] = conv6
-    dfp["Conv_12M"] = conv12
-
-    # Targets base
-    tgt6  = price + gap * dfp["Conv_6M"]  * dfp["TV_Penalty"]
-    tgt12 = price + gap * dfp["Conv_12M"] * dfp["TV_Penalty"]
-
-    # Caps de upside para no pedir imposibles (operativo)
-    cap6  = np.where(dfp["Action"].eq("STRONG BUY"), 1.20, 0.90)  # 120% vs 90%
-    cap12 = np.where(dfp["Action"].eq("STRONG BUY"), 1.80, 1.40)  # 180% vs 140%
-
-    dfp["Target_6M"]  = np.minimum(tgt6,  price * (1 + cap6))
-    dfp["Target_12M"] = np.minimum(tgt12, price * (1 + cap12))
-
-    dfp["Upside_6M"]  = (dfp["Target_6M"]  - price) / price
-    dfp["Upside_12M"] = (dfp["Target_12M"] - price) / price
-
-    # Trim y Stop (simple sin ATR)
-    # Trim_6M: toma parcial al 70% del camino al Target_6M
-    dfp["Trim_6M"] = price + (dfp["Target_6M"] - price) * 0.70
-
-    # Stop: STRONG -12%, BUY -10%
-    stop_pct = np.where(dfp["Action"].eq("STRONG BUY"), 0.12, 0.10)
-    dfp["Stop_Price"] = price * (1 - stop_pct)
-
-    return dfp
-
 @app.route('/refine', methods=['GET'])
 def refine_endpoint():
     """
-    Endpoint para Analyst AI V7 - Portfolio Analysis + Exit Plan
-    Toma los datos del último análisis (caché o ejecuta nuevo) y aplica análisis avanzado
+    Endpoint para Portfolio Manager Review
+    Toma los datos del último análisis (caché o ejecuta nuevo) y los refina
     """
+    if not PORTFOLIO_REFINER_AVAILABLE:
+        return jsonify({
+            "error": "Portfolio Refiner not available"
+        }), 503
     
     try:
         log("\n" + "="*60)
-        log("🧠 Analyst AI V7 - Portfolio Analysis + Exit Plan")
+        log("🧠 Portfolio Manager Review")
         log("="*60)
         
         # 1. Intentar obtener datos del caché primero
@@ -1272,131 +994,66 @@ def refine_endpoint():
         
         # 3. Verificar que tenemos resultados
         if not data:
-            log("❌ No hay resultados para analizar")
+            log("❌ No hay resultados para refinar")
             return jsonify({
                 "error": "No analysis results available. Run /analyze first."
             }), 404
         
-        # 4. Verificar formato de datos y extraer results
+        # 4. Verificar formato de datos
+        # Si data tiene 'results', lo usamos directamente
+        # Si data es una lista, necesitamos construir el objeto
         if isinstance(data, list):
-            results_list = data
+            # Es solo la lista de results, construir objeto completo
+            data_obj = {'results': data}
         elif isinstance(data, dict) and 'results' in data:
-            results_list = data['results']
+            data_obj = data
         else:
             log("❌ Formato de datos inválido")
             return jsonify({
                 "error": "Invalid data format"
             }), 500
         
-        if not results_list:
-            log("❌ Lista de resultados vacía")
+        # 5. Refinar los datos
+        candidates_count = len(data_obj.get('results', [])) if isinstance(data_obj.get('results'), list) else data_obj.get('candidates_count', 0)
+        log(f"🔍 Refinando {candidates_count} candidatos...")
+        
+        refiner = PortfolioRefiner(data_obj)
+        refined_data = refiner.refine_all()
+        
+        if refined_data is None:
+            log("❌ Error en refinamiento")
             return jsonify({
-                "error": "No results to analyze"
-            }), 404
+                "error": "Failed to refine data"
+            }), 500
         
-        # 5. Convertir a DataFrame para Analyst AI
-        log(f"🔍 Analizando {len(results_list)} candidatos con Analyst AI V7...")
-        df_input = pd.DataFrame(results_list)
-        
-        # 6. Aplicar Analyst AI V7 (solo JOYAS)
-        df_analyzed = analyst_ai_v37(df_input, return_all=False)
-        
-        if df_analyzed.empty:
-            log("⚠️  No se encontraron JOYAS (STRONG BUY/BUY)")
-            # Retornar estructura vacía pero válida
-            return jsonify({
-                "status": "success",
-                "refined_data": {
-                    "joyas": [],
-                    "summary": {
-                        "total_candidates": len(results_list),
-                        "strong_buy_count": 0,
-                        "buy_count": 0,
-                        "total_joyas": 0
-                    },
-                    "methodology": "Analyst AI V7 - Institutional Grade Selection"
-                },
-                "refined_at": datetime.now().isoformat(),
-                "original_analysis": {
-                    "generated_at": data.get('generated_at') if isinstance(data, dict) else None,
-                    "total_analyzed": data.get('total_analyzed') if isinstance(data, dict) else len(results_list),
-                    "candidates_count": len(results_list),
-                    "from_cache": data.get('from_cache', False) if isinstance(data, dict) else False
-                }
-            })
-        
-        # 7. Agregar Exit Plan (Targets 6M/12M + Trim/Stop)
-        df_final = add_exit_plan(df_analyzed)
-        
-        # 8. Convertir a diccionarios para JSON (con manejo de NaN/Inf)
-        joyas_list = df_final.replace({np.nan: None, np.inf: None, -np.inf: None}).to_dict('records')
-        
-        # 9. Calcular métricas de resumen
-        strong_buy_count = len(df_final[df_final['Action'] == 'STRONG BUY'])
-        buy_count = len(df_final[df_final['Action'] == 'BUY'])
-        
-        log(f"✅ Análisis completado: {len(joyas_list)} JOYAS encontradas")
-        log(f"   💎 STRONG BUY: {strong_buy_count}")
-        log(f"   ✅ BUY: {buy_count}")
+        log("✅ Refinamiento completado exitosamente")
         log("="*60)
         
-        # 10. Preparar respuesta estructurada
-        refined_data = {
-            "joyas": joyas_list,
-            "summary": {
-                "total_candidates": len(results_list),
-                "strong_buy_count": strong_buy_count,
-                "buy_count": buy_count,
-                "total_joyas": len(joyas_list)
-            },
-            "methodology": {
-                "name": "Analyst AI V7 - Institutional Grade Selection",
-                "description": "Filtros estrictos de calidad, robustez y riesgo controlado",
-                "gates": {
-                    "min_piotroski_buy": 6,
-                    "min_piotroski_strong": 7,
-                    "min_roic_buy": "10%",
-                    "min_roic_strong": "12%",
-                    "max_tv_weight_buy": "80%",
-                    "max_tv_weight_strong": "77%",
-                    "max_debt_to_mcap_buy": 1.0,
-                    "max_debt_to_mcap_strong": 0.9,
-                    "require_positive_fcf": True
-                },
-                "exit_plan": {
-                    "target_6m": "Conservative convergence to fair value (40-60%)",
-                    "target_12m": "Thesis convergence to fair value (55-80%)",
-                    "trim_6m": "70% of the way to 6M target",
-                    "stop_loss": "STRONG BUY: -12%, BUY: -10%"
-                }
-            }
-        }
-        
+        # 6. Retornar respuesta
         response_data = {
             "status": "success",
             "refined_data": refined_data,
             "refined_at": datetime.now().isoformat(),
             "original_analysis": {
-                "generated_at": data.get('generated_at') if isinstance(data, dict) else None,
-                "total_analyzed": data.get('total_analyzed') if isinstance(data, dict) else len(results_list),
-                "candidates_count": len(results_list),
-                "from_cache": data.get('from_cache', False) if isinstance(data, dict) else False
+                "generated_at": data_obj.get('generated_at'),
+                "total_analyzed": data_obj.get('total_analyzed'),
+                "candidates_count": data_obj.get('candidates_count'),
+                "from_cache": data_obj.get('from_cache', False)
             }
         }
         
         return jsonify(response_data)
         
     except Exception as e:
-        log(f"❌ Error en Analyst AI: {str(e)}")
+        log(f"❌ Error en refinamiento: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    log(f"🚀 Iniciando Warren Screener v8 - Oracle V7.2 + Analyst AI V7 en puerto {port}")
-    log(f"📦 Metodología: Oracle V7.2 (DCF 2-Stage + ROIC + Piotroski Real)")
-    log(f"🧠 Analyst AI: Institutional Grade Selection + Exit Plan")
+    log(f"🚀 Iniciando Warren Screener v8 en puerto {port}")
+    log(f"📦 Metodología: DCF 2-Stage + ROIC + Piotroski")
     log(f"💾 Cache: {'Enabled' if GCS_AVAILABLE else 'Disabled'}")
     if GCS_AVAILABLE:
         log(f"🪣 Bucket: {GCS_BUCKET_NAME}")
