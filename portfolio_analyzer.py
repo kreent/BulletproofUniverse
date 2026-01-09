@@ -1,6 +1,7 @@
 """
-portfolio_analyzer.py - Warren Screener v8 Core Analysis Engine
-Módulo principal de análisis DCF 2-Stage + Quality Focus
+portfolio_analyzer.py - Oracle Screener V7.2 (FINAL)
+Análisis DCF Audit + Risk Columns + REAL Piotroski (0-9)
+Motor principal de análisis con caché en Cloud Storage
 """
 
 import pandas as pd
@@ -20,14 +21,34 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 # ==========================================
-# ⚙️ PARÁMETROS DE CAZA (AJUSTADOS)
+# ⚙️ CONFIGURACIÓN ORACLE SCREENER V7.2
 # ==========================================
 DEFAULT_CONFIG = {
     'MAX_WORKERS': 12,
     'MIN_ROIC': 0.08,           # 8% mínimo
-    'MIN_PIOTROSKI': 5,         # Calidad mínima
+    
+    # ✅ Piotroski REAL (0-9)
+    'MIN_PIOTROSKI': 6,         # 6 = ok, 7 = fuerte, 8+ excelente
+    'MIN_PIO_COVERAGE': 7,      # mínimo señales evaluadas (de 9)
+    
     'DISCOUNT_RATE': 0.09,      # Tasa exigida del 9%
     'MARGIN_OF_SAFETY_VIEW': -0.20  # Watchlist hasta -20%
+}
+
+# Terminal growth por sector (evita inflar bond proxies)
+TERMINAL_G_BY_SECTOR = {
+    "Communication Services": 0.015,
+    "Utilities": 0.015,
+    "Consumer Defensive": 0.020,
+    "Real Estate": 0.020,
+    "Energy": 0.020,
+    "Basic Materials": 0.020,
+    "Industrials": 0.020,
+    "Technology": 0.025,
+    "Healthcare": 0.022,
+    "Consumer Cyclical": 0.022,
+    "Financial Services": 0.020,
+    "N/A": 0.020
 }
 
 # Cache configuration
@@ -39,6 +60,27 @@ def log(msg):
     """Helper para logging con flush inmediato"""
     print(msg)
     sys.stdout.flush()
+
+
+def safe_float(x):
+    """Convierte a float de forma segura"""
+    try:
+        if x is None:
+            return np.nan
+        if isinstance(x, (np.floating, float)) and np.isnan(x):
+            return np.nan
+        return float(x)
+    except:
+        return np.nan
+
+
+def get_latest_and_prev(series: pd.Series):
+    """Obtiene valor actual y anterior de una serie"""
+    if series is None or series.empty:
+        return (np.nan, np.nan)
+    a = safe_float(series.iloc[0])
+    b = safe_float(series.iloc[1]) if len(series) > 1 else np.nan
+    return a, b
 
 
 class CacheManager:
@@ -236,8 +278,8 @@ class CacheManager:
 
 class PortfolioAnalyzer:
     """
-    Motor principal de análisis de acciones
-    Implementa metodología Warren Buffett con DCF 2-Stage
+    Oracle Screener V7.2 - Motor principal de análisis de acciones
+    Implementa DCF Audit + Risk Columns + REAL Piotroski (0-9)
     """
     
     def __init__(self, config=None, cache_manager=None):
@@ -255,45 +297,28 @@ class PortfolioAnalyzer:
         tickers = set()
         log("🌍 Generando Universo...")
 
-        # Intento 1: GitHub API (más confiable que raw)
+        # Intento 1: GitHub S&P 500
         try:
-            url_sp500 = "https://api.github.com/repos/datasets/s-and-p-500-companies/contents/data/constituents.csv"
-            headers = {'Accept': 'application/vnd.github.v3.raw'}
-            r = requests.get(url_sp500, headers=headers, timeout=30)
-            r.raise_for_status()
-            from io import StringIO
-            df = pd.read_csv(StringIO(r.text))
-            tickers.update(df['Symbol'].tolist())
-            log(f"   -> S&P 500 cargado desde GitHub API ({len(tickers)})")
-        except Exception as e:
-            log(f"   ⚠️ Fallo GitHub S&P 500: {str(e)}")
-            
-            # Fallback: Intentar con raw.githubusercontent.com
-            try:
-                url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-                df = pd.read_csv(url_sp500, timeout=30)
-                tickers.update(df['Symbol'].tolist())
-                log(f"   -> S&P 500 cargado desde GitHub raw ({len(tickers)})")
-            except Exception as e2:
-                log(f"   ⚠️ Fallo GitHub raw: {str(e2)}")
+            url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+            df = pd.read_csv(url_sp500)
+            tickers.update(df["Symbol"].tolist())
+            log(f"   -> S&P 500 cargado desde GitHub ({len(tickers)})")
+        except:
+            log("   ⚠️ Fallo GitHub S&P 500.")
 
         # Intento 2: Nasdaq 100
         try:
-            url_ndx = "https://api.github.com/repos/nasdaq-100/nasdaq-100-symbols/contents/nasdaq-100-symbols.csv"
-            headers = {'Accept': 'application/vnd.github.v3.raw'}
-            r = requests.get(url_ndx, headers=headers, timeout=30)
-            if r.status_code == 200:
-                text = r.text
-                lines = text.split('\n')
-                nasdaq_ticks = [x.split(',')[0].strip() for x in lines if x and 'Symbol' not in x]
-                tickers.update(nasdaq_ticks)
-                log(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
-        except Exception as e:
-            log(f"   ⚠️ Fallo GitHub Nasdaq: {str(e)}")
+            url_ndx = "https://raw.githubusercontent.com/nasdaq-100/nasdaq-100-symbols/master/nasdaq-100-symbols.csv"
+            r = requests.get(url_ndx, timeout=15)
+            lines = r.text.split("\n")
+            nasdaq_ticks = [x.split(",")[0].strip() for x in lines if x and "Symbol" not in x]
+            tickers.update(nasdaq_ticks)
+            log(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
+        except:
+            log("   ⚠️ Fallo GitHub Nasdaq.")
 
-        # Intento 3: Lista de Respaldo MANUAL COMPLETA
+        # Lista de respaldo manual
         BACKUP_LIST = [
-            # Originales (90 tickers)
             'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
             'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
             'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
@@ -303,44 +328,19 @@ class PortfolioAnalyzer:
             'LOW', 'SPGI', 'CAT', 'IBM', 'AMAT', 'DE', 'GS', 'GE', 'LMT', 'PLD',
             'BLK', 'SYK', 'T', 'ISRG', 'BKNG', 'ELV', 'MDT', 'TJX', 'ADI', 'NOW',
             'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI',
-            # Agregados - Los que salen en Colab pero faltaban
             'MET', 'AMP', 'KMB', 'FCX', 'CLX', 'IT', 'BIIB', 'CL', 'ZBRA', 'WSM',
-            'MKTX', 'LII', 'FDS', 'RL', 'HAS',
-            # Más del S&P 500 para completar
-            'GOOG', 'BRK-A', 'AVGO', 'TSLA', 'JPM', 'UNH', 'LLY', 'XOM', 'V', 'PG',
-            'JNJ', 'MA', 'NVDA', 'HD', 'ABBV', 'MRK', 'COST', 'CVX', 'ADBE', 'PEP',
-            'KO', 'TMO', 'CSCO', 'ACN', 'MCD', 'ABT', 'NFLX', 'WFC', 'ORCL', 'CRM',
-            'DHR', 'TXN', 'AMD', 'CMCSA', 'QCOM', 'INTU', 'NKE', 'VZ', 'PM', 'UPS',
-            'NEE', 'RTX', 'HON', 'AMGN', 'LOW', 'SPGI', 'BMY', 'SBUX', 'BA', 'CAT',
-            'GS', 'IBM', 'AXP', 'ISRG', 'GILD', 'BLK', 'DE', 'ELV', 'MDT', 'SCHW',
-            'AMAT', 'SYK', 'PLD', 'LMT', 'ADI', 'BKNG', 'VRTX', 'TJX', 'REGN', 'ADP',
-            'MDLZ', 'CB', 'NOW', 'LRCX', 'MO', 'AMT', 'MMC', 'PYPL', 'PGR', 'SO',
-            'CI', 'DUK', 'ETN', 'BSX', 'SLB', 'ZTS', 'GE', 'EQIX', 'PNC', 'NOC',
-            'USB', 'TGT', 'ITW', 'REGN', 'BDX', 'MU', 'HCA', 'MS', 'WELL', 'KLAC',
-            'EOG', 'C', 'MMM', 'APH', 'FI', 'MCK', 'WM', 'PH', 'SNPS', 'CDNS',
-            'SHW', 'CMG', 'MAR', 'TDG', 'EMR', 'NSC', 'APD', 'MSI', 'NXPI', 'CARR',
-            'PSX', 'ADSK', 'CSX', 'CME', 'COP', 'MPC', 'TT', 'AJG', 'MCO', 'GM',
-            'AFL', 'ROP', 'PCAR', 'O', 'MCHP', 'SRE', 'HUM', 'ORLY', 'AZO', 'PAYX',
-            'D', 'ICE', 'MSCI', 'FTNT', 'KMB', 'ROST', 'ECL', 'AIG', 'TRV', 'CCI',
-            'JCI', 'TEL', 'CPRT', 'AEP', 'CL', 'HSY', 'GWW', 'PSA', 'MNST', 'KMI',
-            'EW', 'FAST', 'BK', 'CTAS', 'FCX', 'NEM', 'ALL', 'ODFL', 'DLR', 'EXC',
-            'SPG', 'CMI', 'IQV', 'KHC', 'CTVA', 'YUM', 'EA', 'XEL', 'GIS', 'VRSK',
-            'AME', 'DXCM', 'HLT', 'KVUE', 'PCG', 'DD', 'OTIS', 'RSG', 'IDXX', 'A',
-            'ANSS', 'VICI', 'VMC', 'MLM', 'BKR', 'KEYS', 'CTSH', 'IT', 'WMB', 'ROK',
-            'EXR', 'OKE', 'RMD', 'PPG', 'DOV', 'GEHC', 'AVB', 'BIIB', 'FICO', 'SYY',
-            'EIX', 'ED', 'CBRE', 'TROW', 'MTD', 'IRM', 'DAL', 'ALNY', 'HAL', 'ACGL',
-            'MPWR', 'WEC', 'WSM', 'XYL', 'FTV', 'GLW', 'WBD', 'FITB', 'IR', 'CHTR',
-            'CDW', 'HPQ', 'TSCO', 'AWK', 'DTE', 'ES', 'CAH', 'PPL', 'FDS', 'ETR',
-            'LH', 'GPN', 'CHD', 'EBAY', 'KEYS', 'RF', 'MTB', 'HPE', 'RL', 'ZBRA',
-            'TTWO', 'NTAP', 'STT', 'BALL', 'CLX', 'HAS', 'LUV', 'UAL', 'MKTX',
-            'LII', 'AMP', 'MET', 'ULTA', 'APTV', 'STE', 'DFS', 'CFG', 'INVH', 'HBAN'
+            'MKTX', 'LII', 'FDS', 'RL', 'HAS', 'GOOG', 'BRK-A', 'TMO', 'BMY', 'SBUX',
+            'BA', 'AXP', 'GILD', 'SCHW', 'MDLZ', 'CB', 'MO', 'AMT', 'PGR', 'SO',
+            'DUK', 'ETN', 'BSX', 'SLB', 'EQIX', 'PNC', 'NOC', 'USB', 'TGT', 'ITW',
+            'BDX', 'MU', 'HCA', 'WELL', 'KLAC', 'EOG', 'C', 'MMM', 'APH', 'FI',
+            'MCK', 'WM', 'PH', 'SNPS', 'CDNS', 'SHW', 'CMG', 'MAR', 'TDG', 'EMR'
         ]
 
         if len(tickers) < 50:
             log(f"   ⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual ({len(BACKUP_LIST)} tickers).")
             tickers.update(BACKUP_LIST)
 
-        final_list = list(set([t.replace('.', '-') for t in tickers]))
+        final_list = list(set([t.replace(".", "-") for t in tickers]))
         final_count = min(500, len(final_list))
         log(f"   ✅ Total final: {final_count} tickers para analizar")
         return final_list[:500]
@@ -348,142 +348,294 @@ class PortfolioAnalyzer:
     @staticmethod
     def get_fuzzy_series(df, keywords):
         """Búsqueda fuzzy de campos en DataFrames financieros"""
-        if df.empty: 
+        if df is None or df.empty:
             return pd.Series(dtype=float)
         
+        df = df.copy()
         df.index = df.index.astype(str).str.lower().str.strip()
         
         for key in keywords:
-            key = key.lower()
-            if key in df.index: 
-                return df.loc[key]
-            matches = [idx for idx in df.index if key in idx]
-            if matches: 
+            k = key.lower()
+            if k in df.index:
+                return df.loc[k]
+            matches = [i for i in df.index if k in i]
+            if matches:
                 return df.loc[min(matches, key=len)]
         
         return pd.Series(dtype=float)
     
+    def compute_piotroski_fscore(self, inc, bal, cf):
+        """
+        Piotroski F-Score REAL (0-9) + Coverage
+        Retorna: (score, coverage) donde coverage = #señales evaluadas
+        """
+        score = 0
+        covered = 0
+        
+        # Series necesarias
+        ni = self.get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+        ocf = self.get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+        
+        assets = self.get_fuzzy_series(bal, ["Total Assets"])
+        
+        # Deuda ideal: long term, si no total
+        ltd = self.get_fuzzy_series(bal, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"])
+        if ltd.empty:
+            ltd = self.get_fuzzy_series(bal, ["Total Debt"])
+        
+        current_assets = self.get_fuzzy_series(bal, ["Current Assets", "Total Current Assets"])
+        current_liab = self.get_fuzzy_series(bal, ["Current Liabilities", "Total Current Liabilities"])
+        
+        revenue = self.get_fuzzy_series(inc, ["Total Revenue", "Revenue"])
+        gross_profit = self.get_fuzzy_series(inc, ["Gross Profit"])
+        
+        shares = self.get_fuzzy_series(bal, ["Ordinary Shares Number", "Share Issued"])
+        
+        # Valores t y t-1
+        ni_t, ni_t1 = get_latest_and_prev(ni)
+        ocf_t, ocf_t1 = get_latest_and_prev(ocf)
+        assets_t, assets_t1 = get_latest_and_prev(assets)
+        ltd_t, ltd_t1 = get_latest_and_prev(ltd)
+        ca_t, ca_t1 = get_latest_and_prev(current_assets)
+        cl_t, cl_t1 = get_latest_and_prev(current_liab)
+        rev_t, rev_t1 = get_latest_and_prev(revenue)
+        gp_t, gp_t1 = get_latest_and_prev(gross_profit)
+        sh_t, sh_t1 = get_latest_and_prev(shares)
+        
+        def ratio(a, b):
+            return a / b if (not np.isnan(a) and not np.isnan(b) and b != 0) else np.nan
+        
+        # Ratios
+        roa_t = ratio(ni_t, assets_t)
+        roa_t1 = ratio(ni_t1, assets_t1)
+        
+        cr_t = ratio(ca_t, cl_t)
+        cr_t1 = ratio(ca_t1, cl_t1)
+        
+        lev_t = ratio(ltd_t, assets_t)
+        lev_t1 = ratio(ltd_t1, assets_t1)
+        
+        gm_t = ratio(gp_t, rev_t)
+        gm_t1 = ratio(gp_t1, rev_t1)
+        
+        at_t = ratio(rev_t, assets_t)
+        at_t1 = ratio(rev_t1, assets_t1)
+        
+        # 1) ROA > 0
+        if not np.isnan(roa_t):
+            covered += 1
+            score += 1 if roa_t > 0 else 0
+        
+        # 2) CFO > 0
+        if not np.isnan(ocf_t):
+            covered += 1
+            score += 1 if ocf_t > 0 else 0
+        
+        # 3) ΔROA > 0
+        if not np.isnan(roa_t) and not np.isnan(roa_t1):
+            covered += 1
+            score += 1 if roa_t > roa_t1 else 0
+        
+        # 4) Accrual: CFO > NI
+        if not np.isnan(ocf_t) and not np.isnan(ni_t):
+            covered += 1
+            score += 1 if ocf_t > ni_t else 0
+        
+        # 5) ΔLeverage: lev baja
+        if not np.isnan(lev_t) and not np.isnan(lev_t1):
+            covered += 1
+            score += 1 if lev_t < lev_t1 else 0
+        
+        # 6) ΔLiquidity: current ratio mejora
+        if not np.isnan(cr_t) and not np.isnan(cr_t1):
+            covered += 1
+            score += 1 if cr_t > cr_t1 else 0
+        
+        # 7) No dilution: shares no suben
+        if not np.isnan(sh_t) and not np.isnan(sh_t1):
+            covered += 1
+            score += 1 if sh_t <= sh_t1 else 0
+        
+        # 8) ΔGross margin: GM mejora
+        if not np.isnan(gm_t) and not np.isnan(gm_t1):
+            covered += 1
+            score += 1 if gm_t > gm_t1 else 0
+        
+        # 9) ΔAsset turnover: AT mejora
+        if not np.isnan(at_t) and not np.isnan(at_t1):
+            covered += 1
+            score += 1 if at_t > at_t1 else 0
+        
+        return score, covered
+    
     def analyze_stock(self, ticker):
-        """Analiza una acción individual con metodología Warren Buffett + DCF"""
+        """
+        Analiza una acción individual con Oracle Screener V7.2
+        DCF Audit + Risk Columns + REAL Piotroski (0-9)
+        """
         try:
             t = yf.Ticker(ticker)
 
-            # Filtro rápido de liquidez/precio
+            # Fast filter
             try:
                 fast = t.fast_info
-                if fast.market_cap < 5_000_000_000: 
-                    return None  # Solo > 5B Cap
-            except: 
+                market_cap = safe_float(getattr(fast, "market_cap", np.nan))
+                if np.isnan(market_cap) or market_cap < 5_000_000_000:
+                    return None
+                price = safe_float(getattr(fast, "last_price", np.nan))
+                shares = safe_float(getattr(fast, "shares", np.nan))
+                if np.isnan(price) or price <= 0 or np.isnan(shares) or shares <= 0:
+                    return None
+            except:
                 return None
 
             inc = t.income_stmt
             bal = t.balance_sheet
             cf = t.cashflow
-
-            if inc.empty or bal.empty or cf.empty: 
+            
+            if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
                 return None
 
-            # Ordenar cronológicamente
+            # Orden cronológico (más reciente primero)
             inc = inc[sorted(inc.columns, reverse=True)]
             bal = bal[sorted(bal.columns, reverse=True)]
             cf = cf[sorted(cf.columns, reverse=True)]
 
-            # Extracción Fuzzy
-            ni = self.get_fuzzy_series(inc, ['Net Income', 'NetIncome'])
-            ebit = self.get_fuzzy_series(inc, ['EBIT', 'Operating Income'])
-            ocf = self.get_fuzzy_series(cf, ['Operating Cash Flow', 'Total Cash From Operating Activities'])
-            capex = self.get_fuzzy_series(cf, ['Capital Expenditures', 'Purchase of PPE'])
-            equity = self.get_fuzzy_series(bal, ['Stockholders Equity', 'Total Equity'])
-            debt = self.get_fuzzy_series(bal, ['Total Debt'])
-            cash = self.get_fuzzy_series(bal, ['Cash', 'Cash And Cash Equivalents'])
+            # --- Extracción fuzzy ---
+            ni = self.get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+            ebit = self.get_fuzzy_series(inc, ["EBIT", "Operating Income"])
+            ocf = self.get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
 
-            if ni.empty or ocf.empty or equity.empty: 
+            capex = self.get_fuzzy_series(cf, [
+                "Capital Expenditures",
+                "Purchase of PPE",
+                "Investments in Property Plant and Equipment"
+            ])
+
+            equity = self.get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
+
+            # Deuda robusta
+            debt = self.get_fuzzy_series(bal, [
+                "Total Debt",
+                "Long Term Debt",
+                "Long Term Debt And Capital Lease Obligation",
+                "Short Long Term Debt",
+                "Short Term Debt"
+            ])
+
+            # Cash robusto
+            cash = self.get_fuzzy_series(bal, [
+                "Cash",
+                "Cash And Cash Equivalents",
+                "Cash Cash Equivalents And Short Term Investments"
+            ])
+
+            if ni.empty or ocf.empty or equity.empty:
                 return None
 
-            # --- A. CALIDAD (ROIC & PIOTROSKI) ---
-            # ROIC
-            curr_ebit = ebit.iloc[0] if not ebit.empty else ni.iloc[0]
-            curr_eq = equity.iloc[0]
-            curr_debt = debt.iloc[0] if not debt.empty else 0
-            curr_cash = cash.iloc[0] if not cash.empty else 0
+            # --- Valores actuales ---
+            curr_ebit = safe_float(ebit.iloc[0]) if (not ebit.empty and not pd.isna(ebit.iloc[0])) else safe_float(ni.iloc[0])
+            curr_eq = safe_float(equity.iloc[0]) if not pd.isna(equity.iloc[0]) else 0.0
+            curr_debt = safe_float(debt.iloc[0]) if (not debt.empty and not pd.isna(debt.iloc[0])) else 0.0
+            curr_cash = safe_float(cash.iloc[0]) if (not cash.empty and not pd.isna(cash.iloc[0])) else 0.0
 
             invested_cap = curr_eq + curr_debt - curr_cash
-            roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0
-
-            if roic < self.config['MIN_ROIC']: 
+            roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0.0
+            
+            if roic < self.config['MIN_ROIC']:
                 return None
 
-            # Piotroski Rápido
-            piotroski = 0
+            # ✅ Piotroski REAL (0-9) + coverage
+            piotroski, pio_cov = self.compute_piotroski_fscore(inc, bal, cf)
+
+            # Si coverage es bajo, no confiamos
+            if pio_cov < self.config['MIN_PIO_COVERAGE']:
+                return None
+
+            if piotroski < self.config['MIN_PIOTROSKI']:
+                return None
+
+            # Sector
             try:
-                if len(ni) > 1:
-                    piotroski += 1 if ni.iloc[0] > 0 else 0
-                    piotroski += 1 if ocf.iloc[0] > 0 else 0
-                    piotroski += 1 if ni.iloc[0] > ni.iloc[1] else 0
-                    piotroski += 1 if ocf.iloc[0] > ni.iloc[0] else 0
-                    piotroski += 1 if (not debt.empty and len(debt)>1 and curr_debt <= debt.iloc[1]) else 0
-                else: 
-                    piotroski = 5  # Beneficio de la duda
-            except: 
-                piotroski = 5
+                sector = t.info.get("sector", "N/A")
+            except:
+                sector = "N/A"
 
-            if piotroski < self.config['MIN_PIOTROSKI']: 
-                return None
+            # --- FCF ---
+            ocf_val = safe_float(ocf.iloc[0]) if not pd.isna(ocf.iloc[0]) else np.nan
+            cpx_val = abs(safe_float(capex.iloc[0])) if (not capex.empty and not pd.isna(capex.iloc[0])) else 0.0
+            fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
 
-            # --- B. VALORACIÓN (DCF 2-Etapas) ---
-            price = fast.last_price
-            cpx_val = abs(capex.iloc[0]) if not capex.empty else 0
-            fcf = ocf.iloc[0] - cpx_val
+            # --- Growth proxy ---
+            growth_est = min(roic * 0.5, 0.14)
+            growth_est = max(growth_est, 0.03)
 
-            intrinsic = 0
+            # Terminal g por sector
+            terminal_g = TERMINAL_G_BY_SECTOR.get(sector, TERMINAL_G_BY_SECTOR["N/A"])
+
+            # --- DCF 2-Stage ---
+            intrinsic = 0.0
             mos = -0.99
+            tv_weight = np.nan
 
-            if fcf > 0:
-                # Tasa de crecimiento: Proxy basado en ROIC y Reinvestment
-                growth_proxy = min(roic * 0.5, 0.14)  # Max 14%
-                growth_proxy = max(growth_proxy, 0.03)  # Min 3%
+            if (not np.isnan(fcf)) and fcf > 0:
+                r = self.config['DISCOUNT_RATE']
 
-                # Stage 1: 5 años
-                future_cash = 0
+                # Stage 1: 5 años de crecimiento
+                pv_stage1 = 0.0
                 for i in range(1, 6):
-                    val = fcf * ((1 + growth_proxy) ** i)
-                    future_cash += val / ((1 + self.config['DISCOUNT_RATE']) ** i)
+                    fcf_i = fcf * ((1 + growth_est) ** i)
+                    pv_stage1 += fcf_i / ((1 + r) ** i)
 
-                # Stage 2: Terminal
-                terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
-                term_val = (terminal_fcf * 1.03) / (self.config['DISCOUNT_RATE'] - 0.03)
-                term_val_pv = term_val / ((1 + self.config['DISCOUNT_RATE']) ** 5)
+                # Validar que discount_rate > terminal_g
+                if r <= terminal_g:
+                    return None
 
-                ev = future_cash + term_val_pv
+                # Stage 2: Terminal value
+                terminal_fcf = fcf * ((1 + growth_est) ** 5)
+                tv = (terminal_fcf * (1 + terminal_g)) / (r - terminal_g)
+                pv_tv = tv / ((1 + r) ** 5)
+
+                ev = pv_stage1 + pv_tv
                 equity_val = ev + curr_cash - curr_debt
-                intrinsic = equity_val / fast.shares
+                intrinsic = equity_val / shares
 
                 if intrinsic > 0:
                     mos = (intrinsic - price) / intrinsic
+                    tv_weight = pv_tv / ev if ev > 0 else np.nan
 
-            # FILTRO DE SALIDA
+            # Filtro de salida
             if mos < self.config['MARGIN_OF_SAFETY_VIEW'] and piotroski < 7:
                 return None
 
-            # Obtener sector
-            try:
-                sector = t.info.get('sector', 'N/A')
-            except:
-                sector = 'N/A'
+            # --- Risk Columns ---
+            debt_to_mcap = (curr_debt / market_cap) if (market_cap > 0) else np.nan
+            fcf_yield = (fcf / market_cap) if (market_cap > 0 and not np.isnan(fcf)) else np.nan
 
             return {
                 'Ticker': ticker,
                 'Price': round(price, 2),
+                'Intrinsic': round(intrinsic, 2),
+                'MOS': round(mos, 4),
+                'ROIC': round(roic, 4),
+                'Piotroski': int(piotroski),
+                'Piotroski_Coverage': int(pio_cov),
+                'Growth_Est': round(growth_est, 4),
+                'Terminal_g': round(terminal_g, 4),
                 'Sector': sector,
-                'ROIC': roic,
-                'Piotroski': piotroski,
-                'Growth_Est': growth_proxy,
-                'Intrinsic': intrinsic,
-                'MOS': mos
+                # Nuevas columnas
+                'FCF': round(fcf, 2) if not np.isnan(fcf) else None,
+                'OCF': round(ocf_val, 2) if not np.isnan(ocf_val) else None,
+                'Debt': round(curr_debt, 2),
+                'Cash': round(curr_cash, 2),
+                'MarketCap': round(market_cap, 2),
+                'Weight': round(tv_weight, 4) if not np.isnan(tv_weight) else None,
+                # Columnas adicionales de riesgo
+                'Debt_to_MCap': round(debt_to_mcap, 4) if not np.isnan(debt_to_mcap) else None,
+                'FCF_Yield': round(fcf_yield, 4) if not np.isnan(fcf_yield) else None
             }
 
         except Exception as e:
-            # Log silencioso de errores individuales
             return None
     
     def run_analysis(self, use_cache=True):
@@ -499,7 +651,7 @@ class PortfolioAnalyzer:
         # Si no hay caché, ejecutar análisis
         start_time = time.time()
         
-        log("🎯 Iniciando Warren Screener v8")
+        log("🎯 Iniciando Oracle Screener V7.2")
         log("="*60)
         
         # 1. Obtener universo
@@ -544,16 +696,17 @@ class PortfolioAnalyzer:
         result = {
             "total_analyzed": len(tickers),
             "candidates_count": len(df),
-            "results": all_results,  # TODOS los resultados, ordenados por MOS descendente
+            "results": all_results,
             "summary": {
-                "buy_zone_count": len(buy_candidates),      # MOS > 10%
-                "fair_zone_count": len(fair_value),         # MOS 0-10%
-                "watch_zone_count": len(watchlist)          # MOS < 0%
+                "buy_zone_count": len(buy_candidates),
+                "fair_zone_count": len(fair_value),
+                "watch_zone_count": len(watchlist)
             },
             "generated_at": datetime.now().isoformat(),
             "cache_enabled": self.cache_manager.gcs_available,
             "from_cache": False,
-            "execution_time_seconds": execution_time
+            "execution_time_seconds": execution_time,
+            "version": "Oracle Screener V7.2"
         }
         
         log("="*60)
@@ -591,7 +744,11 @@ def analyze_portfolio(config=None, use_cache=True):
 
 # Para uso standalone
 if __name__ == "__main__":
-    print("Portfolio Analyzer listo para ejecutar")
+    print("="*60)
+    print("🏛️ Oracle Screener V7.2 (FINAL)")
+    print("   DCF Audit + Risk Columns + REAL Piotroski (0-9)")
+    print("="*60)
+    print("")
     print("Uso:")
     print("  from portfolio_analyzer import PortfolioAnalyzer, CacheManager")
     print("  analyzer = PortfolioAnalyzer()")
@@ -600,3 +757,9 @@ if __name__ == "__main__":
     print("  # O con función de conveniencia:")
     print("  from portfolio_analyzer import analyze_portfolio")
     print("  results = analyze_portfolio()")
+    print("")
+    print("Configuración actual:")
+    print(f"  MIN_ROIC: {DEFAULT_CONFIG['MIN_ROIC']*100}%")
+    print(f"  MIN_PIOTROSKI: {DEFAULT_CONFIG['MIN_PIOTROSKI']} (real 0-9)")
+    print(f"  MIN_PIO_COVERAGE: {DEFAULT_CONFIG['MIN_PIO_COVERAGE']}/9 señales")
+    print(f"  DISCOUNT_RATE: {DEFAULT_CONFIG['DISCOUNT_RATE']*100}%")
