@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar el código fuente
 COPY main.py .
+COPY portfolio_analyzer.py .
 COPY portfolio_refiner.py .
 COPY post_processor.py .
 COPY portfolio_tracker.py .

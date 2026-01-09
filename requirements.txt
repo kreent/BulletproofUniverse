@@ -1,11 +1,19 @@
-yfinance
-tqdm
-requests
-lxml
-pandas
-numpy
-flask
-functions-framework
-google-cloud-storage
-gunicorn
+# Core dependencies
+flask==3.0.0
+gunicorn==21.2.0
 
+# Data analysis
+pandas==2.1.4
+numpy==1.26.2
+
+# Finance data
+yfinance==0.2.33
+
+# Cloud Storage
+google-cloud-storage==2.14.0
+
+# Progress bars
+tqdm==4.66.1
+
+# HTTP requests
+requests==2.31.0
