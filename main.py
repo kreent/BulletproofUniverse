@@ -65,7 +65,7 @@ except Exception as e:
     bucket = None
 
 # ==========================================
-# ⚙️ CONFIG
+# ⚙️ PARÁMETROS DE CAZA (AJUSTADOS)
 # ==========================================
 CONFIG = {
     "MAX_WORKERS": 12,
@@ -94,6 +94,7 @@ TERMINAL_G_BY_SECTOR = {
     "Financial Services": 0.020,
     "N/A": 0.020
 }
+
 
 def log(msg):
     print(msg)
@@ -304,10 +305,9 @@ def get_bulletproof_universe():
 # ==========================================
 def get_fuzzy_series(df, keywords):
     """Búsqueda fuzzy de campos en DataFrames financieros"""
-    if df is None or df.empty: 
+    if df.empty: 
         return pd.Series(dtype=float)
     
-    df = df.copy()
     df.index = df.index.astype(str).str.lower().str.strip()
     
     for key in keywords:
@@ -320,8 +320,10 @@ def get_fuzzy_series(df, keywords):
     
     return pd.Series(dtype=float)
 
+# ==========================================
+# 3. REAL PIOTROSKI (0–9) + COVERAGE
+# ==========================================
 def safe_float(x):
-    """Convierte valor a float de forma segura"""
     try:
         if x is None:
             return np.nan
@@ -332,16 +334,12 @@ def safe_float(x):
         return np.nan
 
 def get_latest_and_prev(series: pd.Series):
-    """Obtiene el valor más reciente y el anterior de una serie"""
     if series is None or series.empty:
         return (np.nan, np.nan)
     a = safe_float(series.iloc[0])
     b = safe_float(series.iloc[1]) if len(series) > 1 else np.nan
     return a, b
 
-# ==========================================
-# 3. REAL PIOTROSKI (0–9) + COVERAGE
-# ==========================================
 def compute_piotroski_fscore(inc, bal, cf):
     """
     Piotroski F-Score real (0-9).
@@ -446,10 +444,9 @@ def compute_piotroski_fscore(inc, bal, cf):
     return score, covered
 
 # ==========================================
-# 4. ANÁLISIS FINANCIERO (DCF 2-STAGE + CALIDAD)
+# 4) ANALYZE STOCK (V7.2) - mantiene salida del endpoint
 # ==========================================
 def analyze_stock_v7(ticker):
-    """V7.2 - EXACTO del Colab sin modificaciones"""
     try:
         t = yf.Ticker(ticker)
 
@@ -547,7 +544,6 @@ def analyze_stock_v7(ticker):
         # --- DCF ---
         intrinsic = 0.0
         mos = -0.99
-        tv_weight = np.nan
 
         if (not np.isnan(fcf)) and fcf > 0:
             r = CONFIG["DISCOUNT_RATE"]
@@ -570,42 +566,21 @@ def analyze_stock_v7(ticker):
 
             if intrinsic > 0:
                 mos = (intrinsic - price) / intrinsic
-                tv_weight = pv_tv / ev if ev > 0 else np.nan
 
         # filtro salida
         if mos < CONFIG["MARGIN_OF_SAFETY_VIEW"] and piotroski < 7:
             return None
 
-        debt_to_mcap = (curr_debt / market_cap) if (market_cap > 0) else np.nan
-        fcf_yield = (fcf / market_cap) if (market_cap > 0 and not np.isnan(fcf)) else np.nan
-
+        # ✅ mantener misma salida que antes (campos principales)
         return {
-            "Ticker": ticker,
-            "Price": price,
-            "Sector": sector,
-            "ROIC": roic,
-
-            "Piotroski": piotroski,
-            "Piotroski_Coverage": pio_cov,
-
-            "Growth_Est": growth_proxy,
-            "Terminal_g": terminal_g,
-
-            "Intrinsic": intrinsic,
-            "MOS": mos,
-
-            "FCF": fcf,
-            "OCF": ocf_val,
-            "Capex": cpx_val,
-            "Debt": curr_debt,
-            "Cash": curr_cash,
-            "Equity": curr_eq,
-            "InvestedCap": invested_cap,
-            "Shares": shares,
-            "MarketCap": market_cap,
-            "Debt_to_MCap": debt_to_mcap,
-            "FCF_Yield": fcf_yield,
-            "DCF_TV_Weight": tv_weight
+            'Ticker': ticker,
+            'Price': round(price, 2),
+            'Sector': sector,
+            'ROIC': roic,
+            'Piotroski': piotroski,
+            'Growth_Est': growth_proxy,
+            'Intrinsic': intrinsic,
+            'MOS': mos
         }
 
     except Exception:
@@ -613,6 +588,7 @@ def analyze_stock_v7(ticker):
 
 
 # ==========================================
+
 # 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
 # ==========================================
 def run_analysis():
@@ -636,7 +612,7 @@ def run_analysis():
     
     # 2. Análisis paralelo
     results = []
-    with ThreadPoolExecutor(max_workers=CONFIG["MAX_WORKERS"]) as executor:
+    with ThreadPoolExecutor(max_workers=CONFIG['MAX_WORKERS']) as executor:
         futures = {executor.submit(analyze_stock_v7, t): t for t in tickers}
         for future in as_completed(futures):
             r = future.result()
@@ -665,14 +641,13 @@ def run_analysis():
     # 5. Resultado final
     execution_time = round(time.time() - start_time, 2)
     
-    # ✅ IGUAL QUE COLAB: Solo devolver top 30 (df.head(30))
-    top_30_df = df.head(30)
-    top_30_results = top_30_df.replace({np.nan: None}).to_dict('records')
+    # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
+    all_results = df.replace({np.nan: None}).to_dict('records')
     
     result = {
         "total_analyzed": len(tickers),
-        "candidates_count": len(df),  # Total de candidatos encontrados
-        "results": top_30_results,     # ✅ Solo TOP 30, igual que Colab
+        "candidates_count": len(df),
+        "results": all_results,  # TODOS los resultados, ordenados por MOS descendente
         "summary": {
             "buy_zone_count": len(buy_candidates),      # MOS > 10%
             "fair_zone_count": len(fair_value),         # MOS 0-10%
@@ -685,7 +660,7 @@ def run_analysis():
     }
     
     log("="*60)
-    log(f"💎 RESULTADOS FINALES ({len(df)} encontrados, mostrando top 30):")
+    log(f"💎 RESULTADOS FINALES ({len(df)} encontrados):")
     log(f"📊 Total analizados: {len(tickers)}")
     log(f"⭐ Candidatos finales: {len(df)}")
     log(f"   🟢 Zona de Compra (MOS > 10%): {len(buy_candidates)}")
@@ -721,9 +696,9 @@ def home():
         ],
         "filters": {
             "min_market_cap": "5B USD",
-            "min_roic": f"{CONFIG["MIN_ROIC"]*100}%",
-            "min_piotroski": CONFIG["MIN_PIOTROSKI"],
-            "discount_rate": f"{CONFIG["DISCOUNT_RATE"]*100}%"
+            "min_roic": f"{CONFIG['MIN_ROIC']*100}%",
+            "min_piotroski": CONFIG['MIN_PIOTROSKI'],
+            "discount_rate": f"{CONFIG['DISCOUNT_RATE']*100}%"
         },
         "endpoints": {
             "/analyze": "Run analysis (with 24h cache + auto post-processing)",
@@ -753,6 +728,20 @@ def analyze():
         log("="*60)
         
         results = run_analysis()
+        
+        # Post-procesamiento automático
+        if POST_PROCESSOR_AVAILABLE and results.get('candidates_count', 0) > 0:
+            try:
+                log("🔄 Ejecutando post-procesamiento...")
+                processor = ResultsPostProcessor(results)
+                processed_data = processor.process_all()
+                
+                # Agregar datos procesados a la respuesta
+                results['post_processed'] = processed_data
+                log("✅ Post-procesamiento completado")
+            except Exception as e:
+                log(f"⚠️  Error en post-procesamiento: {e}")
+                results['post_processed'] = None
         
         response = app.response_class(
             response=json.dumps(results, default=str, allow_nan=False)
