@@ -495,18 +495,54 @@ def analyze_stock_v7(ticker):
         # filtro salida
         if mos < CONFIG["MARGIN_OF_SAFETY_VIEW"] and piotroski < 7:
             return None
-        # ✅ mantener misma salida que antes (campos principales)
-        return {
-            'Ticker': ticker,
-            'Price': round(price, 2),
-            'Sector': sector,
-            'ROIC': roic,
-            'Piotroski': piotroski,
-            'Growth_Est': growth_proxy,
-            'Intrinsic': intrinsic,
-            'MOS': mos
-        }
-    except Exception:
+        # ✅ Output COMPLETO para que /refine pueda operar (sin romper /analyze: se “recorta” al responder)
+debt_to_mcap = (curr_debt / market_cap) if (market_cap and market_cap > 0) else np.nan
+fcf_yield = (fcf / market_cap) if (market_cap and market_cap > 0 and not np.isnan(fcf)) else np.nan
+
+# Peso de TV para fragilidad DCF
+dcf_tv_weight = np.nan
+try:
+    # si no hay DCF válido ev puede estar implícito; aquí solo estimamos cuando intrinsic calculó con fcf>0
+    if (not np.isnan(fcf)) and fcf > 0:
+        r = CONFIG["DISCOUNT_RATE"]
+        pv_stage1 = 0.0
+        for i in range(1, 6):
+            fcf_i = fcf * ((1 + growth_proxy) ** i)
+            pv_stage1 += fcf_i / ((1 + r) ** i)
+        terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
+        tv = (terminal_fcf * (1 + terminal_g)) / (r - terminal_g) if (r > terminal_g) else np.nan
+        pv_tv = tv / ((1 + r) ** 5) if not np.isnan(tv) else np.nan
+        ev = pv_stage1 + pv_tv if (not np.isnan(pv_tv)) else np.nan
+        dcf_tv_weight = (pv_tv / ev) if (ev and ev > 0 and not np.isnan(pv_tv)) else np.nan
+except Exception:
+    dcf_tv_weight = np.nan
+
+return {
+    # Campos “base” (compatibles con el output viejo)
+    "Ticker": ticker,
+    "Price": round(price, 2),
+    "Sector": sector,
+    "ROIC": roic,
+    "Piotroski": piotroski,
+    "Growth_Est": growth_proxy,
+    "Intrinsic": intrinsic,
+    "MOS": mos,
+
+    # Campos extra (requeridos por /refine)
+    "Terminal_g": terminal_g,
+    "FCF": fcf,
+    "OCF": ocf_val,
+    "Capex": cpx_val,
+    "Debt": curr_debt,
+    "Cash": curr_cash,
+    "Equity": curr_eq,
+    "InvestedCap": invested_cap,
+    "Shares": shares,
+    "MarketCap": market_cap,
+    "Debt_to_MCap": debt_to_mcap,
+    "FCF_Yield": fcf_yield,
+    "DCF_TV_Weight": dcf_tv_weight
+}    except Exception:
         return None
 # ==========================================
 # 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
@@ -561,13 +597,13 @@ def run_analysis():
     # 5. Resultado final
     execution_time = round(time.time() - start_time, 2)
     
-    # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
-    all_results = df.replace({np.nan: None}).to_dict('records')
-    
-    result = {
-        "total_analyzed": len(tickers),
-        "candidates_count": len(df),
-        "results": all_results,  # TODOS los resultados, ordenados por MOS descendente
+    # Convertir resultados FULL (con métricas) y PUBLIC (compatible con el output viejo)
+df_full = df.copy()
+full_results = df_full.replace({np.nan: None}).to_dict('records')
+
+public_cols = ["Ticker","Price","Sector","ROIC","Piotroski","Growth_Est","Intrinsic","MOS"]
+existing_public_cols = [c for c in public_cols if c in df_full.columns]
+public_results = df_full[existing_public_cols].replace({np.nan: None}).to_dict('records')
         "summary": {
             "buy_zone_count": len(buy_candidates),      # MOS > 10%
             "fair_zone_count": len(fair_value),         # MOS 0-10%
@@ -660,6 +696,15 @@ def analyze():
                 log(f"⚠️  Error en post-procesamiento: {e}")
                 results['post_processed'] = None
         
+
+# Mantener compatibilidad del endpoint /analyze: no exponer el payload completo usado por /refine
+try:
+    if isinstance(results, dict) and "_full_results" in results:
+        results = dict(results)  # copia
+        results.pop("_full_results", None)
+except Exception:
+    pass
+
         response = app.response_class(
             response=json.dumps(results, default=str, allow_nan=False)
                      .replace('NaN', 'null')
@@ -909,7 +954,11 @@ def refine_endpoint():
         else:
             log("❌ Formato de datos inválido")
             return jsonify({"error": "Invalid data format"}), 500
-        results_list = data_obj.get('results', [])
+        # Preferir resultados completos (necesarios para columnas extra de Analyst AI)
+if isinstance(data_obj, dict) and data_obj.get('_full_results'):
+    results_list = data_obj.get('_full_results', [])
+else:
+    results_list = data_obj.get('results', [])
         if not isinstance(results_list, list) or len(results_list) == 0:
             log("❌ Lista de resultados vacía")
             return jsonify({"error": "No results to refine"}), 404
