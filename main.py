@@ -349,7 +349,7 @@ def cache_status():
             "error": str(e)
         }), 500
 
-@app.route('/clear-cache')
+@app.route('/clear-cache', methods=['GET', 'POST'])
 def clear_cache():
     """Endpoint para limpiar el caché manualmente"""
     if not GCS_AVAILABLE:
@@ -366,7 +366,7 @@ def clear_cache():
             log("🗑️  Caché eliminado manualmente")
             return jsonify({
                 "success": True,
-                "message": "Cache cleared successfully"
+                "message": "Cache cleared successfully. Next /analyze will run fresh analysis."
             })
         else:
             return jsonify({
@@ -379,6 +379,114 @@ def clear_cache():
         return jsonify({
             "success": False,
             "error": str(e)
+        }), 500
+
+@app.route('/diagnose')
+def diagnose():
+    """Endpoint de diagnóstico para debug"""
+    if not PORTFOLIO_ANALYZER_AVAILABLE:
+        return jsonify({
+            "error": "Portfolio Analyzer not available"
+        }), 503
+    
+    try:
+        from portfolio_analyzer import WarrenScreener
+        
+        # Crear screener con config por defecto
+        screener = WarrenScreener()
+        
+        # Probar con un ticker conocido
+        test_ticker = "AAPL"
+        log(f"\n🔍 Diagnosticando con {test_ticker}...")
+        result = screener.analyze_ticker(test_ticker)
+        
+        return jsonify({
+            "status": "ok",
+            "test_ticker": test_ticker,
+            "result": result,
+            "config_used": screener.config,
+            "terminal_g_sectors": screener.TERMINAL_G_BY_SECTOR
+        })
+        
+    except Exception as e:
+        log(f"❌ Error en diagnóstico: {str(e)}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+@app.route('/analyze-debug')
+def analyze_debug():
+    """
+    Endpoint de debugging con filtros MUY permisivos
+    Solo para diagnosticar problemas - analiza 50 tickers
+    """
+    if not PORTFOLIO_ANALYZER_AVAILABLE:
+        return jsonify({
+            "error": "Portfolio Analyzer not available"
+        }), 503
+    
+    log("\n" + "="*60)
+    log("🐛 DEBUG MODE - Análisis con filtros ultra permisivos")
+    log("="*60)
+    
+    try:
+        # Config ultra permisivo
+        debug_config = {
+            'MAX_WORKERS': 6,
+            'MIN_ROIC': 0.01,  # 1% - súper permisivo
+            'MIN_PIOTROSKI': 3,
+            'MIN_PIO_COVERAGE': 3,
+            'DISCOUNT_RATE': 0.09,
+            'MARGIN_OF_SAFETY_VIEW': -0.90
+        }
+        
+        log(f"📊 Config de debug:")
+        for key, value in debug_config.items():
+            log(f"   {key}: {value}")
+        
+        from portfolio_analyzer import WarrenScreener
+        screener = WarrenScreener(debug_config)
+        
+        # Solo 50 tickers para test rápido
+        screener.get_bulletproof_universe()
+        screener.universe = screener.universe[:50]
+        
+        log(f"\n🎯 Analizando {len(screener.universe)} tickers...")
+        log(f"   Muestra: {screener.universe[:10]}")
+        
+        screener.run_parallel_analysis()
+        categorized = screener.categorize_results()
+        
+        import pandas as pd
+        df_all = pd.DataFrame(screener.results) if screener.results else pd.DataFrame()
+        top_10 = df_all.nlargest(10, 'MOS').to_dict('records') if not df_all.empty else []
+        
+        result = {
+            'mode': 'DEBUG',
+            'config': debug_config,
+            'universe_size': len(screener.universe),
+            'candidates_count': len(screener.results),
+            'buy_candidates': len(categorized['buy_zone']),
+            'top_10': top_10,
+            'all_results': screener.results[:20],  # Solo primeros 20
+            'generated_at': datetime.now().isoformat()
+        }
+        
+        log("="*60)
+        log(f"✅ Debug: {len(screener.results)} candidatos de {len(screener.universe)}")
+        log("="*60)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        log(f"❌ Error en debug: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }), 500
 
 @app.route('/health')

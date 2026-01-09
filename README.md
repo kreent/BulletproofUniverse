@@ -273,6 +273,45 @@ gcloud scheduler jobs create http warren-daily-update \
 
 ## 🐛 Troubleshooting
 
+### ❌ Caché corrupto - 0 resultados retornados
+
+**Síntoma más común:**
+```json
+{
+  "candidates_count": 0,
+  "from_cache": true,
+  "results": []
+}
+```
+
+**Causa:** El caché contiene resultados de una ejecución que falló (Yahoo Finance bloqueado, timeout, etc.).
+
+**Solución inmediata:**
+```bash
+# Opción 1: Script automático
+./force_reanalysis.sh
+
+# Opción 2: Comandos manuales
+curl https://TU_URL/clear-cache
+sleep 2
+curl https://TU_URL/analyze  # Tomará ~4 minutos
+```
+
+**Verificación:**
+```bash
+# Ver estado del caché
+curl https://TU_URL/cache-status
+
+# Diagnóstico (prueba con AAPL)
+curl https://TU_URL/diagnose
+```
+
+**⚠️ IMPORTANTE:** Después de cada deploy, limpia el caché si sospechas problemas.
+
+📚 **Ver [TROUBLESHOOTING.md](TROUBLESHOOTING.md) para guía completa de debugging**
+
+---
+
 ### Sin resultados o muy pocos
 
 **Posibles causas:**

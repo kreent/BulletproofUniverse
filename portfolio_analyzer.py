@@ -1,6 +1,6 @@
 """
-portfolio_analyzer.py - Warren Screener Core Analysis
-Toda la lógica de análisis DCF 2-Stage + ROIC + Piotroski
+portfolio_analyzer.py - Oracle Screener V7.2
+Análisis DCF 2-Stage + ROIC + Piotroski Real (0-9)
 """
 
 import pandas as pd
@@ -11,13 +11,11 @@ import sys
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
-from io import StringIO
 
 
 class WarrenScreener:
     """
-    Warren Screener v8.0 - DCF 2-Stage + Quality Focus
-    Análisis basado en ROIC, Piotroski y DCF avanzado
+    Oracle Screener V7.2 - DCF con Piotroski Real + Columnas de Riesgo
     """
     
     def __init__(self, config=None):
@@ -28,9 +26,26 @@ class WarrenScreener:
         self.config = config or {
             'MAX_WORKERS': 12,
             'MIN_ROIC': 0.08,
-            'MIN_PIOTROSKI': 5,
+            'MIN_PIOTROSKI': 6,        # 6 = ok, 7 = fuerte, 8+ excelente
+            'MIN_PIO_COVERAGE': 7,     # mínimo señales evaluadas (de 9)
             'DISCOUNT_RATE': 0.09,
             'MARGIN_OF_SAFETY_VIEW': -0.20
+        }
+        
+        # Terminal growth por sector (evita inflar bond proxies)
+        self.TERMINAL_G_BY_SECTOR = {
+            "Communication Services": 0.015,
+            "Utilities": 0.015,
+            "Consumer Defensive": 0.020,
+            "Real Estate": 0.020,
+            "Energy": 0.020,
+            "Basic Materials": 0.020,
+            "Industrials": 0.020,
+            "Technology": 0.025,
+            "Healthcare": 0.022,
+            "Consumer Cyclical": 0.022,
+            "Financial Services": 0.020,
+            "N/A": 0.020
         }
         
         self.universe = []
@@ -42,398 +57,361 @@ class WarrenScreener:
         sys.stdout.flush()
     
     # ==========================================
-    # 1. UNIVERSO INDESTRUCTIBLE (CSV + HARDCODE)
+    # 1. UNIVERSO
     # ==========================================
     def get_bulletproof_universe(self):
         """Genera universo robusto de tickers desde múltiples fuentes"""
         tickers = set()
         self.log("🌍 Generando Universo...")
 
-        # Intento 1: GitHub API (más confiable que raw)
         try:
-            url_sp500 = "https://api.github.com/repos/datasets/s-and-p-500-companies/contents/data/constituents.csv"
-            headers = {'Accept': 'application/vnd.github.v3.raw'}
-            r = requests.get(url_sp500, headers=headers, timeout=30)
-            r.raise_for_status()
-            df = pd.read_csv(StringIO(r.text))
-            tickers.update(df['Symbol'].tolist())
-            self.log(f"   -> S&P 500 cargado desde GitHub API ({len(tickers)})")
-        except Exception as e:
-            self.log(f"   ⚠️ Fallo GitHub S&P 500: {str(e)}")
-            
-            # Fallback: Intentar con raw.githubusercontent.com
-            try:
-                url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-                df = pd.read_csv(url_sp500, timeout=30)
-                tickers.update(df['Symbol'].tolist())
-                self.log(f"   -> S&P 500 cargado desde GitHub raw ({len(tickers)})")
-            except Exception as e2:
-                self.log(f"   ⚠️ Fallo GitHub raw: {str(e2)}")
+            url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+            df = pd.read_csv(url_sp500)
+            tickers.update(df["Symbol"].tolist())
+            self.log(f"   -> S&P 500 cargado desde GitHub ({len(tickers)})")
+        except:
+            self.log("   ⚠️ Fallo GitHub S&P 500.")
 
-        # Intento 2: Nasdaq 100
         try:
-            url_ndx = "https://api.github.com/repos/nasdaq-100/nasdaq-100-symbols/contents/nasdaq-100-symbols.csv"
-            headers = {'Accept': 'application/vnd.github.v3.raw'}
-            r = requests.get(url_ndx, headers=headers, timeout=30)
-            if r.status_code == 200:
-                text = r.text
-                lines = text.split('\n')
-                nasdaq_ticks = [x.split(',')[0].strip() for x in lines if x and 'Symbol' not in x]
-                tickers.update(nasdaq_ticks)
-                self.log(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
-        except Exception as e:
-            self.log(f"   ⚠️ Fallo GitHub Nasdaq: {str(e)}")
+            url_ndx = "https://raw.githubusercontent.com/nasdaq-100/nasdaq-100-symbols/master/nasdaq-100-symbols.csv"
+            r = requests.get(url_ndx, timeout=15)
+            lines = r.text.split("\n")
+            nasdaq_ticks = [x.split(",")[0].strip() for x in lines if x and "Symbol" not in x]
+            tickers.update(nasdaq_ticks)
+            self.log(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
+        except:
+            self.log("   ⚠️ Fallo GitHub Nasdaq.")
 
-        # Intento 3: Lista de Respaldo MANUAL COMPLETA
         BACKUP_LIST = [
-            # Originales (90 tickers)
-            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
-            'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
-            'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
-            'PEP', 'NFLX', 'TMO', 'CRM', 'ACN', 'CSCO', 'MCD', 'ABT', 'LIN', 'NKE',
-            'TXN', 'DHR', 'INTC', 'WFC', 'QCOM', 'PM', 'INTU', 'VZ', 'CMCSA', 'UNP',
-            'RTX', 'IBM', 'AMGN', 'CAT', 'HON', 'T', 'GE', 'BA', 'GS', 'LOW',
-            'NEE', 'SPGI', 'BLK', 'AXP', 'NOW', 'ISRG', 'SBUX', 'SYK', 'ELV', 'MS',
-            'BKNG', 'PLD', 'GILD', 'TJX', 'MDT', 'MMC', 'ADP', 'C', 'VRTX', 'CVS',
-            'REGN', 'BMY', 'ZTS', 'SCHW', 'ADI', 'PGR', 'MO', 'ETN', 'CB', 'SO',
-            # 410 tickers adicionales del universo completo
-            'DUK', 'LRCX', 'AMT', 'BDX', 'CI', 'TMUS', 'FI', 'DE', 'SLB', 'PYPL',
-            'AMAT', 'MDLZ', 'USB', 'TGT', 'BSX', 'PNC', 'EQIX', 'CME', 'ITW', 'AON',
-            'APD', 'CL', 'WELL', 'MMM', 'EOG', 'SHW', 'CSX', 'WM', 'NSC', 'GD',
-            'ICE', 'MCO', 'FCX', 'APH', 'MAR', 'COF', 'MU', 'HCA', 'NOC', 'EMR',
-            'PSA', 'SNPS', 'CCI', 'OXY', 'ECL', 'TFC', 'MCK', 'FDX', 'ROP', 'AJG',
-            'NXPI', 'AFL', 'GM', 'ADM', 'F', 'AIG', 'AEP', 'TRV', 'SRE', 'MPC',
-            'TEL', 'ADSK', 'CDNS', 'PSX', 'MNST', 'AZO', 'KMB', 'JCI', 'HUM', 'RSG',
-            'PAYX', 'VLO', 'COR', 'ALL', 'LHX', 'DHI', 'O', 'SPG', 'D', 'KLAC',
-            'NEM', 'EW', 'PRU', 'HSY', 'CMG', 'MSCI', 'YUM', 'KHC', 'KMI', 'MSI',
-            'EXC', 'ORLY', 'MCHP', 'GIS', 'SYY', 'CTVA', 'BK', 'LEN', 'A', 'OKE',
-            'EXR', 'ODFL', 'CEG', 'IQV', 'CNC', 'TROW', 'FAST', 'IDXX', 'HES', 'DD',
-            'VST', 'CTAS', 'XEL', 'IT', 'ROK', 'ED', 'DOW', 'KR', 'EA', 'CPRT',
-            'GEHC', 'ROST', 'VICI', 'KVUE', 'ON', 'VRSK', 'GLW', 'STZ', 'VMC', 'PPG',
-            'AME', 'BKR', 'CMI', 'ANSS', 'HAL', 'DXCM', 'AWK', 'ACGL', 'URI', 'CHTR',
-            'HPQ', 'PCAR', 'MTD', 'DVN', 'IR', 'CSGP', 'PCG', 'MLM', 'IFF', 'FANG',
-            'WMB', 'EBAY', 'FITB', 'GPN', 'DAL', 'WEC', 'HWM', 'RMD', 'TTWO', 'ETR',
-            'WAB', 'HIG', 'AMP', 'PPL', 'BRO', 'SBAC', 'GRMN', 'CARR', 'NDAQ', 'WTW',
-            'KEYS', 'FTV', 'HPE', 'WBD', 'DLR', 'LYB', 'STE', 'DLTR', 'FE', 'EXPE',
-            'GWW', 'APTV', 'STT', 'HBAN', 'PEG', 'NTRS', 'MTB', 'EQR', 'AVB', 'HUBB',
-            'ZBH', 'AEE', 'WAT', 'RF', 'WY', 'LH', 'VTR', 'BLDR', 'EFX', 'ARE',
-            'EIX', 'PFG', 'DFS', 'INVH', 'ULTA', 'ESS', 'DTE', 'SYF', 'IRM', 'DG',
-            'TSCO', 'TDY', 'BBY', 'CBOE', 'MAA', 'DRI', 'K', 'CAH', 'TRGP', 'EQT',
-            'BALL', 'ATO', 'FDS', 'OMC', 'MKC', 'VLTO', 'TYL', 'LDOS', 'CBRE', 'BAX',
-            'HOLX', 'EXPD', 'DGX', 'STLD', 'TXT', 'CLX', 'LUV', 'CFG', 'RJF', 'MPWR',
-            'TSN', 'SWK', 'CNP', 'CMS', 'MOH', 'WST', 'DOV', 'NI', 'PTC', 'MRO',
-            'TER', 'PODD', 'FLT', 'NRG', 'L', 'WDC', 'ZBRA', 'PKG', 'NVR', 'IP',
-            'AES', 'SWKS', 'J', 'COO', 'VRSN', 'AMCR', 'LVS', 'UAL', 'JBHT', 'CINF',
-            'TPR', 'LNT', 'EVRG', 'SJM', 'FICO', 'AVY', 'NUE', 'AKAM', 'NTAP', 'CHRW',
-            'KIM', 'ALGN', 'HST', 'BXP', 'POOL', 'CZR', 'ALB', 'GNRC', 'MAS', 'JKHY',
-            'BEN', 'TECH', 'IPG', 'UDR', 'AIZ', 'CTLT', 'ENPH', 'CPT', 'TFX', 'REG',
-            'PKI', 'NDSN', 'GL', 'IEX', 'EMN', 'LKQ', 'CE', 'BBWI', 'PAYC', 'TAP',
-            'JNPR', 'AOS', 'DAY', 'HII', 'AAL', 'HRL', 'HSIC', 'AAP', 'UHS', 'INCY',
-            'MKTX', 'CPB', 'BF-B', 'BWA', 'BIO', 'WBA', 'NWSA', 'EPAM', 'FFIV', 'CRL',
-            'VTRS', 'DXC', 'QRVO', 'SEE', 'PNR', 'WYNN', 'RL', 'RHI', 'AIV', 'FOXA',
-            'NWS', 'HAS', 'IVZ', 'ETSY', 'MTCH', 'DISH', 'FOX', 'PARA', 'NCLH', 'CCL',
-            'DINO', 'SEDG', 'WHR', 'PNW', 'CMA', 'MGM', 'DVA', 'GPC', 'FRT', 'APA',
-            'KMX', 'ZION', 'LW', 'ALLE', 'MHK', 'NWL', 'TAP', 'BG', 'VFC', 'FMC',
-            # Añadir más tickers si hace falta
-            'ABNB', 'RIVN', 'LCID', 'PLTR', 'SNOW', 'RBLX', 'U', 'DASH', 'COIN',
-            'SHOP', 'SQ', 'ZM', 'ROKU', 'PINS', 'DOCU', 'CRWD', 'NET', 'DDOG', 'OKTA'
+            'AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA','BRK-B','LLY','V',
+            'TSM','UNH','AVGO','JPM','NVO','WMT','XOM','MA','JNJ','PG',
+            'HD','MRK','COST','ABBV','ORCL','ASML','CVX','ADBE','AMD','KO',
+            'PEP','CRM','BAC','ACN','CSCO','NFLX','MCD','LIN','AZN','NKE',
+            'DIS','TMUS','ABT','DHR','WFC','INTC','INTU','QCOM','CMCSA','TXN',
+            'VZ','UPS','PM','NEE','RTX','MS','HON','AMGN','UNP','PFE',
+            'LOW','SPGI','CAT','IBM','AMAT','DE','GS','GE','LMT','PLD',
+            'BLK','SYK','T','ISRG','BKNG','ELV','MDT','TJX','ADI','NOW',
+            'MMC','CVS','ADP','VRTX','LRCX','UBER','REGN','PYPL','ZTS','CI'
         ]
-        
-        tickers.update(BACKUP_LIST)
-        self.log(f"   -> Backup manual agregado ({len(BACKUP_LIST)} tickers)")
 
-        # Limpieza
-        cleaned = sorted([t.upper().strip() for t in tickers if t and t.strip()])
-        self.log(f"✅ Universo final: {len(cleaned)} tickers")
-        
-        self.universe = cleaned
-        return cleaned
+        if len(tickers) < 50:
+            self.log("⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual.")
+            tickers.update(BACKUP_LIST)
+
+        final_list = list(set([t.replace(".", "-") for t in tickers]))
+        self.universe = final_list[:500]
+        self.log(f"✅ Universo final: {len(self.universe)} tickers")
+        return self.universe
 
     # ==========================================
-    # 2. LÓGICA DE ANÁLISIS (DCF 2-STAGE)
+    # 2. FUZZY SERIES
     # ==========================================
-    
-    def _safe_get(self, data, keys, default=None):
-        """Navegación segura por diccionarios anidados"""
-        current = data
-        for key in keys:
-            if isinstance(current, dict):
-                current = current.get(key)
-                if current is None:
-                    return default
-            else:
-                return default
-        return current if current is not None else default
+    def get_fuzzy_series(self, df, keywords):
+        """Búsqueda fuzzy de series en dataframes financieros"""
+        if df is None or df.empty:
+            return pd.Series(dtype=float)
 
-    def _fuzzy_find(self, info, possible_keys, default=None):
-        """Busca fuzzy entre múltiples claves posibles"""
-        for key in possible_keys:
-            val = info.get(key)
-            if val is not None and val not in [np.nan, float('inf'), float('-inf')]:
-                return val
-        return default
+        df = df.copy()
+        df.index = df.index.astype(str).str.lower().str.strip()
 
-    def calculate_roic(self, ticker_obj):
-        """Calcula ROIC = EBIT * (1 - Tax) / (Equity + Debt - Cash)"""
+        for key in keywords:
+            k = key.lower()
+            if k in df.index:
+                return df.loc[k]
+            matches = [i for i in df.index if k in i]
+            if matches:
+                return df.loc[min(matches, key=len)]
+
+        return pd.Series(dtype=float)
+
+    def safe_float(self, x):
+        """Conversión segura a float"""
         try:
-            info = ticker_obj.info
-            bs = ticker_obj.balance_sheet
-            inc = ticker_obj.income_stmt
-            
-            if bs.empty or inc.empty:
-                return None
-            
-            # EBIT
-            ebit = self._fuzzy_find(inc.iloc[:, 0].to_dict(), 
-                                    ['EBIT', 'Operating Income', 'operatingIncome'])
-            if ebit is None:
-                return None
-            
-            # Tax Rate
-            tax_rate = self._fuzzy_find(info, ['effectiveTaxRate', 'taxRate'], 0.21)
-            
-            # Balance
-            equity = self._fuzzy_find(bs.iloc[:, 0].to_dict(), 
-                                     ['Total Equity', 'Stockholders Equity', 
-                                      'Total Stockholder Equity', 'totalStockholderEquity'])
-            total_debt = self._fuzzy_find(bs.iloc[:, 0].to_dict(),
-                                         ['Total Debt', 'totalDebt', 'Long Term Debt'])
-            cash = self._fuzzy_find(bs.iloc[:, 0].to_dict(),
-                                   ['Cash And Cash Equivalents', 'Cash', 'cashAndCashEquivalents'])
-            
-            if None in [equity, total_debt, cash]:
-                return None
-            
-            invested_capital = equity + total_debt - cash
-            
-            if invested_capital <= 0:
-                return None
-            
-            nopat = ebit * (1 - tax_rate)
-            roic = nopat / invested_capital
-            
-            return roic if -1 <= roic <= 3 else None
-            
-        except Exception:
-            return None
+            if x is None:
+                return np.nan
+            if isinstance(x, (np.floating, float)) and np.isnan(x):
+                return np.nan
+            return float(x)
+        except:
+            return np.nan
 
-    def calculate_piotroski(self, ticker_obj):
-        """Calcula Piotroski Score (0-9)"""
-        try:
-            inc = ticker_obj.income_stmt
-            bs = ticker_obj.balance_sheet
-            cf = ticker_obj.cashflow
-            
-            if inc.empty or bs.empty or cf.empty:
-                return None
-            
-            score = 0
-            
-            # 1. ROA positivo
-            net_income = self._safe_get(inc.iloc[:, 0].to_dict(), ['Net Income'])
-            total_assets = self._safe_get(bs.iloc[:, 0].to_dict(), ['Total Assets'])
-            if net_income and total_assets and net_income > 0:
-                score += 1
-            
-            # 2. Operating Cash Flow positivo
-            ocf = self._safe_get(cf.iloc[:, 0].to_dict(), ['Operating Cash Flow'])
-            if ocf and ocf > 0:
-                score += 1
-            
-            # 3. ROA creciente (comparar 2 años)
-            if len(bs.columns) >= 2 and len(inc.columns) >= 2:
-                net_income_prev = self._safe_get(inc.iloc[:, 1].to_dict(), ['Net Income'])
-                total_assets_prev = self._safe_get(bs.iloc[:, 1].to_dict(), ['Total Assets'])
-                
-                if all([net_income, total_assets, net_income_prev, total_assets_prev]):
-                    roa_current = net_income / total_assets
-                    roa_prev = net_income_prev / total_assets_prev
-                    if roa_current > roa_prev:
-                        score += 1
-            
-            # 4. OCF > Net Income (calidad de ganancias)
-            if ocf and net_income and ocf > net_income:
-                score += 1
-            
-            # 5. Deuda decreciente
-            if len(bs.columns) >= 2:
-                debt_current = self._safe_get(bs.iloc[:, 0].to_dict(), ['Total Debt'])
-                debt_prev = self._safe_get(bs.iloc[:, 1].to_dict(), ['Total Debt'])
-                if debt_current and debt_prev and debt_current < debt_prev:
-                    score += 1
-            
-            # 6. Current Ratio creciente
-            if len(bs.columns) >= 2:
-                current_assets = self._safe_get(bs.iloc[:, 0].to_dict(), ['Current Assets'])
-                current_liab = self._safe_get(bs.iloc[:, 0].to_dict(), ['Current Liabilities'])
-                current_assets_prev = self._safe_get(bs.iloc[:, 1].to_dict(), ['Current Assets'])
-                current_liab_prev = self._safe_get(bs.iloc[:, 1].to_dict(), ['Current Liabilities'])
-                
-                if all([current_assets, current_liab, current_assets_prev, current_liab_prev]):
-                    if current_liab > 0 and current_liab_prev > 0:
-                        ratio_current = current_assets / current_liab
-                        ratio_prev = current_assets_prev / current_liab_prev
-                        if ratio_current > ratio_prev:
-                            score += 1
-            
-            # 7. Sin nuevas acciones emitidas
-            if len(bs.columns) >= 2:
-                shares = self._safe_get(bs.iloc[:, 0].to_dict(), ['Share Issued'])
-                shares_prev = self._safe_get(bs.iloc[:, 1].to_dict(), ['Share Issued'])
-                if shares and shares_prev and shares <= shares_prev:
-                    score += 1
-            
-            # 8. Gross Margin creciente
-            if len(inc.columns) >= 2:
-                revenue = self._safe_get(inc.iloc[:, 0].to_dict(), ['Total Revenue'])
-                cogs = self._safe_get(inc.iloc[:, 0].to_dict(), ['Cost Of Revenue'])
-                revenue_prev = self._safe_get(inc.iloc[:, 1].to_dict(), ['Total Revenue'])
-                cogs_prev = self._safe_get(inc.iloc[:, 1].to_dict(), ['Cost Of Revenue'])
-                
-                if all([revenue, cogs, revenue_prev, cogs_prev]):
-                    if revenue > 0 and revenue_prev > 0:
-                        margin = (revenue - cogs) / revenue
-                        margin_prev = (revenue_prev - cogs_prev) / revenue_prev
-                        if margin > margin_prev:
-                            score += 1
-            
-            # 9. Asset Turnover creciente
-            if len(inc.columns) >= 2 and len(bs.columns) >= 2:
-                revenue = self._safe_get(inc.iloc[:, 0].to_dict(), ['Total Revenue'])
-                assets = self._safe_get(bs.iloc[:, 0].to_dict(), ['Total Assets'])
-                revenue_prev = self._safe_get(inc.iloc[:, 1].to_dict(), ['Total Revenue'])
-                assets_prev = self._safe_get(bs.iloc[:, 1].to_dict(), ['Total Assets'])
-                
-                if all([revenue, assets, revenue_prev, assets_prev]):
-                    if assets > 0 and assets_prev > 0:
-                        turnover = revenue / assets
-                        turnover_prev = revenue_prev / assets_prev
-                        if turnover > turnover_prev:
-                            score += 1
-            
-            return score
-            
-        except Exception:
-            return None
+    def get_latest_and_prev(self, series: pd.Series):
+        """Obtiene valor actual y anterior de una serie"""
+        if series is None or series.empty:
+            return (np.nan, np.nan)
+        a = self.safe_float(series.iloc[0])
+        b = self.safe_float(series.iloc[1]) if len(series) > 1 else np.nan
+        return a, b
 
-    def dcf_2stage(self, ticker_obj, roic):
+    # ==========================================
+    # 3. REAL PIOTROSKI (0–9) + COVERAGE
+    # ==========================================
+    def compute_piotroski_fscore(self, inc, bal, cf):
         """
-        DCF 2-Stage Avanzado
-        Stage 1: Crecimiento basado en ROIC (5 años)
-        Stage 2: Valor terminal con crecimiento perpetuo del 3%
+        Piotroski F-Score real (0-9).
+        Retorna: (score, coverage) donde coverage = #señales evaluadas.
         """
-        try:
-            info = ticker_obj.info
-            cf = ticker_obj.cashflow
-            bs = ticker_obj.balance_sheet
-            
-            if cf.empty or bs.empty:
-                return None, None
-            
-            # Free Cash Flow actual
-            ocf = self._safe_get(cf.iloc[:, 0].to_dict(), ['Operating Cash Flow'])
-            capex = self._safe_get(cf.iloc[:, 0].to_dict(), ['Capital Expenditure'])
-            
-            if not ocf or not capex:
-                return None, None
-            
-            fcf = ocf + capex  # capex es negativo
-            
-            if fcf <= 0:
-                return None, None
-            
-            # Estimación de crecimiento basada en ROIC
-            # Crecimiento = ROIC * Tasa de Reinversión (asumimos 50%)
-            growth_rate = min(roic * 0.5, 0.14)  # Cap al 14%
-            
-            # Stage 1: Valor presente de FCF (5 años)
-            discount_rate = self.config['DISCOUNT_RATE']
-            stage1_pv = 0
-            
-            for year in range(1, 6):
-                future_fcf = fcf * ((1 + growth_rate) ** year)
-                pv = future_fcf / ((1 + discount_rate) ** year)
-                stage1_pv += pv
-            
-            # Stage 2: Valor terminal
-            terminal_growth = 0.03
-            fcf_year5 = fcf * ((1 + growth_rate) ** 5)
-            terminal_value = (fcf_year5 * (1 + terminal_growth)) / (discount_rate - terminal_growth)
-            terminal_pv = terminal_value / ((1 + discount_rate) ** 5)
-            
-            # Valor total de la empresa
-            enterprise_value = stage1_pv + terminal_pv
-            
-            # Ajustar por deuda y cash
-            total_debt = self._safe_get(bs.iloc[:, 0].to_dict(), ['Total Debt'])
-            cash = self._safe_get(bs.iloc[:, 0].to_dict(), ['Cash And Cash Equivalents'])
-            shares = self._fuzzy_find(info, ['sharesOutstanding'], 1)
-            
-            if not total_debt:
-                total_debt = 0
-            if not cash:
-                cash = 0
-            
-            equity_value = enterprise_value + cash - total_debt
-            
-            if shares <= 0 or equity_value <= 0:
-                return None, None
-            
-            intrinsic_value = equity_value / shares
-            
-            return intrinsic_value, growth_rate
-            
-        except Exception:
-            return None, None
+        score = 0
+        covered = 0
 
-    def analyze_ticker(self, ticker):
-        """Análisis completo de un ticker"""
+        # Series necesarias
+        ni = self.get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+        ocf = self.get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+
+        assets = self.get_fuzzy_series(bal, ["Total Assets"])
+        # deuda ideal: long term, si no total
+        ltd = self.get_fuzzy_series(bal, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"])
+        if ltd.empty:
+            ltd = self.get_fuzzy_series(bal, ["Total Debt"])
+
+        current_assets = self.get_fuzzy_series(bal, ["Current Assets", "Total Current Assets"])
+        current_liab = self.get_fuzzy_series(bal, ["Current Liabilities", "Total Current Liabilities"])
+
+        revenue = self.get_fuzzy_series(inc, ["Total Revenue", "Revenue"])
+        gross_profit = self.get_fuzzy_series(inc, ["Gross Profit"])
+
+        shares = self.get_fuzzy_series(bal, ["Ordinary Shares Number", "Share Issued"])
+
+        # Valores t y t-1
+        ni_t, ni_t1 = self.get_latest_and_prev(ni)
+        ocf_t, ocf_t1 = self.get_latest_and_prev(ocf)
+        assets_t, assets_t1 = self.get_latest_and_prev(assets)
+        ltd_t, ltd_t1 = self.get_latest_and_prev(ltd)
+        ca_t, ca_t1 = self.get_latest_and_prev(current_assets)
+        cl_t, cl_t1 = self.get_latest_and_prev(current_liab)
+        rev_t, rev_t1 = self.get_latest_and_prev(revenue)
+        gp_t, gp_t1 = self.get_latest_and_prev(gross_profit)
+        sh_t, sh_t1 = self.get_latest_and_prev(shares)
+
+        def ratio(a, b):
+            return a / b if (not np.isnan(a) and not np.isnan(b) and b != 0) else np.nan
+
+        # Ratios
+        roa_t = ratio(ni_t, assets_t)
+        roa_t1 = ratio(ni_t1, assets_t1)
+
+        cr_t = ratio(ca_t, cl_t)
+        cr_t1 = ratio(ca_t1, cl_t1)
+
+        lev_t = ratio(ltd_t, assets_t)
+        lev_t1 = ratio(ltd_t1, assets_t1)
+
+        gm_t = ratio(gp_t, rev_t)
+        gm_t1 = ratio(gp_t1, rev_t1)
+
+        at_t = ratio(rev_t, assets_t)
+        at_t1 = ratio(rev_t1, assets_t1)
+
+        # 1) ROA > 0
+        if not np.isnan(roa_t):
+            covered += 1
+            score += 1 if roa_t > 0 else 0
+
+        # 2) CFO > 0
+        if not np.isnan(ocf_t):
+            covered += 1
+            score += 1 if ocf_t > 0 else 0
+
+        # 3) ΔROA > 0
+        if not np.isnan(roa_t) and not np.isnan(roa_t1):
+            covered += 1
+            score += 1 if roa_t > roa_t1 else 0
+
+        # 4) Accrual: CFO > NI
+        if not np.isnan(ocf_t) and not np.isnan(ni_t):
+            covered += 1
+            score += 1 if ocf_t > ni_t else 0
+
+        # 5) ΔLeverage: lev baja
+        if not np.isnan(lev_t) and not np.isnan(lev_t1):
+            covered += 1
+            score += 1 if lev_t < lev_t1 else 0
+
+        # 6) ΔLiquidity: current ratio mejora
+        if not np.isnan(cr_t) and not np.isnan(cr_t1):
+            covered += 1
+            score += 1 if cr_t > cr_t1 else 0
+
+        # 7) No dilution: shares no suben
+        if not np.isnan(sh_t) and not np.isnan(sh_t1):
+            covered += 1
+            score += 1 if sh_t <= sh_t1 else 0
+
+        # 8) ΔGross margin: GM mejora
+        if not np.isnan(gm_t) and not np.isnan(gm_t1):
+            covered += 1
+            score += 1 if gm_t > gm_t1 else 0
+
+        # 9) ΔAsset turnover: AT mejora
+        if not np.isnan(at_t) and not np.isnan(at_t1):
+            covered += 1
+            score += 1 if at_t > at_t1 else 0
+
+        return score, covered
+
+    # ==========================================
+    # 4. ANALYZE STOCK (V7.2)
+    # ==========================================
+    def analyze_ticker(self, ticker: str):
+        """Análisis completo de un ticker usando Oracle Screener V7.2"""
         try:
             t = yf.Ticker(ticker)
-            info = t.info
-            
-            # Precio actual
-            price = info.get('currentPrice') or info.get('regularMarketPrice')
-            if not price or price <= 0:
+
+            # Fast filter - market cap más permisivo
+            try:
+                fast = t.fast_info
+                market_cap = self.safe_float(getattr(fast, "market_cap", np.nan))
+                
+                # Reducir a 1B para tener más candidatos
+                if np.isnan(market_cap) or market_cap < 1_000_000_000:
+                    return None
+                    
+                price = self.safe_float(getattr(fast, "last_price", np.nan))
+                shares = self.safe_float(getattr(fast, "shares", np.nan))
+                if np.isnan(price) or price <= 0 or np.isnan(shares) or shares <= 0:
+                    return None
+            except Exception as e:
+                # Si fast_info falla, intentar con info
+                try:
+                    info = t.info
+                    market_cap = self.safe_float(info.get("marketCap", np.nan))
+                    if np.isnan(market_cap) or market_cap < 1_000_000_000:
+                        return None
+                    price = self.safe_float(info.get("currentPrice", info.get("regularMarketPrice", np.nan)))
+                    shares = self.safe_float(info.get("sharesOutstanding", np.nan))
+                    if np.isnan(price) or price <= 0 or np.isnan(shares) or shares <= 0:
+                        return None
+                except:
+                    return None
+
+            inc = t.income_stmt
+            bal = t.balance_sheet
+            cf  = t.cashflow
+            if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
                 return None
-            
-            # Sector
-            sector = info.get('sector', 'Unknown')
-            
-            # ROIC
-            roic = self.calculate_roic(t)
-            if roic is None or roic < self.config['MIN_ROIC']:
+
+            # Orden cronológico (más reciente primero)
+            inc = inc[sorted(inc.columns, reverse=True)]
+            bal = bal[sorted(bal.columns, reverse=True)]
+            cf  = cf[sorted(cf.columns, reverse=True)]
+
+            # --- extracción fuzzy ---
+            ni = self.get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+            ebit = self.get_fuzzy_series(inc, ["EBIT", "Operating Income"])
+            ocf = self.get_fuzzy_series(cf,  ["Operating Cash Flow", "Total Cash From Operating Activities"])
+
+            capex = self.get_fuzzy_series(cf, [
+                "Capital Expenditures",
+                "Purchase of PPE",
+                "Investments in Property Plant and Equipment"
+            ])
+
+            equity = self.get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
+
+            # Deuda robusta
+            debt = self.get_fuzzy_series(bal, [
+                "Total Debt",
+                "Long Term Debt",
+                "Long Term Debt And Capital Lease Obligation",
+                "Short Long Term Debt",
+                "Short Term Debt"
+            ])
+
+            # Cash robusto
+            cash = self.get_fuzzy_series(bal, [
+                "Cash",
+                "Cash And Cash Equivalents",
+                "Cash Cash Equivalents And Short Term Investments"
+            ])
+
+            if ni.empty or ocf.empty or equity.empty:
                 return None
-            
-            # Piotroski
-            piotroski = self.calculate_piotroski(t)
-            if piotroski is None or piotroski < self.config['MIN_PIOTROSKI']:
+
+            # --- valores actuales ---
+            curr_ebit = self.safe_float(ebit.iloc[0]) if (not ebit.empty and not pd.isna(ebit.iloc[0])) else self.safe_float(ni.iloc[0])
+            curr_eq   = self.safe_float(equity.iloc[0]) if not pd.isna(equity.iloc[0]) else 0.0
+            curr_debt = self.safe_float(debt.iloc[0]) if (not debt.empty and not pd.isna(debt.iloc[0])) else 0.0
+            curr_cash = self.safe_float(cash.iloc[0]) if (not cash.empty and not pd.isna(cash.iloc[0])) else 0.0
+
+            invested_cap = curr_eq + curr_debt - curr_cash
+            roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0.0
+            if roic < self.config["MIN_ROIC"]:
                 return None
-            
-            # DCF
-            intrinsic_value, growth_est = self.dcf_2stage(t, roic)
-            if intrinsic_value is None or intrinsic_value <= 0:
+
+            # ✅ Piotroski REAL (0-9) + coverage
+            piotroski, pio_cov = self.compute_piotroski_fscore(inc, bal, cf)
+
+            # Si coverage es bajo, no confiamos
+            if pio_cov < self.config["MIN_PIO_COVERAGE"]:
                 return None
-            
-            # Margen de Seguridad
-            mos = (intrinsic_value - price) / intrinsic_value
-            
-            # Filtrar por MOS mínimo para watchlist
-            if mos < self.config['MARGIN_OF_SAFETY_VIEW']:
+
+            if piotroski < self.config["MIN_PIOTROSKI"]:
                 return None
-            
+
+            sector = t.info.get("sector", "N/A")
+
+            # --- FCF ---
+            ocf_val = self.safe_float(ocf.iloc[0]) if not pd.isna(ocf.iloc[0]) else np.nan
+            cpx_val = abs(self.safe_float(capex.iloc[0])) if (not capex.empty and not pd.isna(capex.iloc[0])) else 0.0
+            fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
+
+            # --- Growth proxy ---
+            growth_proxy = min(roic * 0.5, 0.14)
+            growth_proxy = max(growth_proxy, 0.03)
+
+            # Terminal g por sector
+            terminal_g = self.TERMINAL_G_BY_SECTOR.get(sector, self.TERMINAL_G_BY_SECTOR["N/A"])
+
+            # --- DCF ---
+            intrinsic = 0.0
+            mos = -0.99
+            tv_weight = np.nan
+
+            if (not np.isnan(fcf)) and fcf > 0:
+                r = self.config["DISCOUNT_RATE"]
+
+                pv_stage1 = 0.0
+                for i in range(1, 6):
+                    fcf_i = fcf * ((1 + growth_proxy) ** i)
+                    pv_stage1 += fcf_i / ((1 + r) ** i)
+
+                if r <= terminal_g:
+                    return None
+
+                terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
+                tv = (terminal_fcf * (1 + terminal_g)) / (r - terminal_g)
+                pv_tv = tv / ((1 + r) ** 5)
+
+                ev = pv_stage1 + pv_tv
+                equity_val = ev + curr_cash - curr_debt
+                intrinsic = equity_val / shares
+
+                if intrinsic > 0:
+                    mos = (intrinsic - price) / intrinsic
+                    tv_weight = pv_tv / ev if ev > 0 else np.nan
+
+            # filtro salida
+            if mos < self.config["MARGIN_OF_SAFETY_VIEW"] and piotroski < 7:
+                return None
+
             return {
                 'Ticker': ticker,
                 'Price': round(price, 2),
-                'Intrinsic': round(intrinsic_value, 2),
+                'Intrinsic': round(intrinsic, 2),
                 'MOS': round(mos, 4),
                 'ROIC': round(roic, 4),
                 'Piotroski': int(piotroski),
-                'Growth_Est': round(growth_est, 4) if growth_est else None,
-                'Sector': sector
+                'Growth_Est': round(growth_proxy, 4),
+                'Sector': sector,
+                'FCF': round(fcf, 2) if not np.isnan(fcf) else None,
+                'OCF': round(ocf_val, 2) if not np.isnan(ocf_val) else None,
+                'Debt': round(curr_debt, 2),
+                'Cash': round(curr_cash, 2),
+                'MarketCap': round(market_cap, 2),
+                'Weight': round(tv_weight, 4) if not np.isnan(tv_weight) else None
             }
-            
-        except Exception as e:
+
+        except Exception:
             return None
 
     def run_parallel_analysis(self):
@@ -443,10 +421,12 @@ class WarrenScreener:
         self.log("="*60)
         self.log(f"Universo: {len(self.universe)} tickers")
         self.log(f"Workers: {self.config['MAX_WORKERS']}")
-        self.log(f"Filtros: ROIC>={self.config['MIN_ROIC']:.0%}, Piotroski>={self.config['MIN_PIOTROSKI']}")
+        self.log(f"Filtros: ROIC>={self.config['MIN_ROIC']:.0%}, Piotroski>={self.config['MIN_PIOTROSKI']}, Coverage>={self.config['MIN_PIO_COVERAGE']}")
         self.log("="*60 + "\n")
         
         results = []
+        analyzed_count = 0
+        error_count = 0
         
         with ThreadPoolExecutor(max_workers=self.config['MAX_WORKERS']) as executor:
             futures = {executor.submit(self.analyze_ticker, ticker): ticker 
@@ -454,13 +434,28 @@ class WarrenScreener:
             
             with tqdm(total=len(futures), desc="Analizando", unit="ticker") as pbar:
                 for future in as_completed(futures):
-                    result = future.result()
-                    if result:
-                        results.append(result)
+                    analyzed_count += 1
+                    try:
+                        result = future.result()
+                        if result:
+                            results.append(result)
+                            # Log cada resultado encontrado
+                            if len(results) <= 5:  # Solo los primeros 5 para no saturar
+                                self.log(f"  ✅ {result['Ticker']}: MOS={result['MOS']:.1%}, Piotroski={result['Piotroski']}")
+                    except Exception as e:
+                        error_count += 1
+                        if error_count <= 3:  # Solo los primeros 3 errores
+                            ticker = futures[future]
+                            self.log(f"  ❌ Error en {ticker}: {str(e)[:100]}")
                     pbar.update(1)
         
         self.results = results
-        self.log(f"\n✅ Análisis completado: {len(results)} candidatos encontrados")
+        self.log(f"\n📊 Estadísticas:")
+        self.log(f"   Total analizado: {analyzed_count}")
+        self.log(f"   Candidatos encontrados: {len(results)}")
+        self.log(f"   Errores: {error_count}")
+        self.log(f"   Tasa de éxito: {len(results)/analyzed_count*100:.1f}%" if analyzed_count > 0 else "   Tasa de éxito: 0%")
+        
         return results
 
     def categorize_results(self):
@@ -548,7 +543,7 @@ def analyze_portfolio(config=None):
 
 # Para uso standalone
 if __name__ == "__main__":
-    print("Warren Screener v8.0 - Portfolio Analyzer")
+    print("Oracle Screener V7.2 - Portfolio Analyzer")
     print("Uso:")
     print("  from portfolio_analyzer import analyze_portfolio")
     print("  results = analyze_portfolio()")
