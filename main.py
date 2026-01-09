@@ -3,7 +3,6 @@
 # CON CACHÉ EN CLOUD STORAGE DE 24 HORAS
 # Análisis basado en ROIC, Piotroski y DCF avanzado
 # =========================================
-
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -19,7 +18,6 @@ from tqdm.auto import tqdm
 from flask import Flask, jsonify, request
 from google.cloud import storage
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 # Post-processor
 try:
     from post_processor import ResultsPostProcessor
@@ -27,7 +25,6 @@ try:
 except ImportError:
     POST_PROCESSOR_AVAILABLE = False
     print("⚠️  Post-processor no disponible")
-
 # Portfolio Refiner
 try:
     from portfolio_refiner import PortfolioRefiner
@@ -35,7 +32,6 @@ try:
 except ImportError:
     PORTFOLIO_REFINER_AVAILABLE = False
     print("⚠️  Portfolio Refiner no disponible")
-
 # Portfolio Tracker
 try:
     from portfolio_tracker import PortfolioTracker
@@ -43,16 +39,13 @@ try:
 except ImportError:
     PORTFOLIO_TRACKER_AVAILABLE = False
     print("⚠️  Portfolio Tracker no disponible")
-
 # Silencio de logs ruidosos
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
-
 # -------- Configuración de Cloud Storage --------
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "warren-screener-cache")
 CACHE_FILE_NAME = "screener_results.json"
 CACHE_TTL_HOURS = 24
-
 # Inicializar cliente de Cloud Storage
 try:
     storage_client = storage.Client()
@@ -63,22 +56,18 @@ except Exception as e:
     print(f"⚠ Cloud Storage no disponible: {e}")
     GCS_AVAILABLE = False
     bucket = None
-
 # ==========================================
 # ⚙️ PARÁMETROS DE CAZA (AJUSTADOS)
 # ==========================================
 CONFIG = {
     "MAX_WORKERS": 12,
     "MIN_ROIC": 0.08,
-
     # ✅ Piotroski REAL (0-9)
     "MIN_PIOTROSKI": 6,        # 6 = ok, 7 = fuerte, 8+ excelente
     "MIN_PIO_COVERAGE": 7,     # mínimo señales evaluadas (de 9)
-
     "DISCOUNT_RATE": 0.09,
     "MARGIN_OF_SAFETY_VIEW": -0.20
 }
-
 # Terminal growth por sector (evita inflar bond proxies)
 TERMINAL_G_BY_SECTOR = {
     "Communication Services": 0.015,
@@ -94,12 +83,9 @@ TERMINAL_G_BY_SECTOR = {
     "Financial Services": 0.020,
     "N/A": 0.020
 }
-
-
 def log(msg):
     print(msg)
     sys.stdout.flush()
-
 # -------- Funciones de Caché con Cloud Storage --------
 def get_cached_results():
     """Intenta obtener resultados del caché en Cloud Storage"""
@@ -139,7 +125,6 @@ def get_cached_results():
         import traceback
         traceback.print_exc()
         return None
-
 def get_full_cached_data():
     """
     Obtiene el objeto completo del caché (no solo results)
@@ -173,7 +158,6 @@ def get_full_cached_data():
             
     except Exception as e:
         return None
-
 def save_to_cache(results):
     """Guarda resultados en Cloud Storage"""
     if not GCS_AVAILABLE:
@@ -200,14 +184,12 @@ def save_to_cache(results):
         import traceback
         traceback.print_exc()
         return False
-
 # ==========================================
 # 1. UNIVERSO INDESTRUCTIBLE (CSV + HARDCODE)
 # ==========================================
 def get_bulletproof_universe():
     tickers = set()
     print("🌍 Generando Universo...")
-
     # Intento 1: GitHub API (más confiable que raw)
     try:
         # Usando GitHub API en lugar de raw.githubusercontent.com
@@ -230,7 +212,6 @@ def get_bulletproof_universe():
             print(f"   -> S&P 500 cargado desde GitHub raw ({len(tickers)})")
         except Exception as e2:
             print(f"   ⚠️ Fallo GitHub raw: {str(e2)}")
-
     # Intento 2: Nasdaq 100
     try:
         url_ndx = "https://api.github.com/repos/nasdaq-100/nasdaq-100-symbols/contents/nasdaq-100-symbols.csv"
@@ -244,7 +225,6 @@ def get_bulletproof_universe():
             print(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
     except Exception as e:
         print(f"   ⚠️ Fallo GitHub Nasdaq: {str(e)}")
-
     # Intento 3: Lista de Respaldo MANUAL COMPLETA
     # Lista actualizada con TODOS los tickers que aparecen en Colab
     BACKUP_LIST = [
@@ -290,16 +270,13 @@ def get_bulletproof_universe():
         'TTWO', 'NTAP', 'STT', 'BALL', 'CLX', 'HAS', 'LUV', 'UAL', 'MKTX',
         'LII', 'AMP', 'MET', 'ULTA', 'APTV', 'STE', 'DFS', 'CFG', 'INVH', 'HBAN'
     ]
-
     if len(tickers) < 50:
         print(f"   ⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual ({len(BACKUP_LIST)} tickers).")
         tickers.update(BACKUP_LIST)
-
     final_list = list(set([t.replace('.', '-') for t in tickers]))
     final_count = min(500, len(final_list))
     print(f"   ✅ Total final: {final_count} tickers para analizar")
     return final_list[:500] # Limitamos a 500 para velocidad
-
 # ==========================================
 # 2. MOTOR DE BÚSQUEDA FUZZY (V5 Core)
 # ==========================================
@@ -319,7 +296,6 @@ def get_fuzzy_series(df, keywords):
             return df.loc[min(matches, key=len)]
     
     return pd.Series(dtype=float)
-
 # ==========================================
 # 3. REAL PIOTROSKI (0–9) + COVERAGE
 # ==========================================
@@ -332,14 +308,12 @@ def safe_float(x):
         return float(x)
     except:
         return np.nan
-
 def get_latest_and_prev(series: pd.Series):
     if series is None or series.empty:
         return (np.nan, np.nan)
     a = safe_float(series.iloc[0])
     b = safe_float(series.iloc[1]) if len(series) > 1 else np.nan
     return a, b
-
 def compute_piotroski_fscore(inc, bal, cf):
     """
     Piotroski F-Score real (0-9).
@@ -347,25 +321,19 @@ def compute_piotroski_fscore(inc, bal, cf):
     """
     score = 0
     covered = 0
-
     # Series necesarias
     ni = get_fuzzy_series(inc, ["Net Income", "NetIncome"])
     ocf = get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
-
     assets = get_fuzzy_series(bal, ["Total Assets"])
     # deuda ideal: long term, si no total
     ltd = get_fuzzy_series(bal, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"])
     if ltd.empty:
         ltd = get_fuzzy_series(bal, ["Total Debt"])
-
     current_assets = get_fuzzy_series(bal, ["Current Assets", "Total Current Assets"])
     current_liab = get_fuzzy_series(bal, ["Current Liabilities", "Total Current Liabilities"])
-
     revenue = get_fuzzy_series(inc, ["Total Revenue", "Revenue"])
     gross_profit = get_fuzzy_series(inc, ["Gross Profit"])
-
     shares = get_fuzzy_series(bal, ["Ordinary Shares Number", "Share Issued"])
-
     # Valores t y t-1
     ni_t, ni_t1 = get_latest_and_prev(ni)
     ocf_t, ocf_t1 = get_latest_and_prev(ocf)
@@ -376,80 +344,62 @@ def compute_piotroski_fscore(inc, bal, cf):
     rev_t, rev_t1 = get_latest_and_prev(revenue)
     gp_t, gp_t1 = get_latest_and_prev(gross_profit)
     sh_t, sh_t1 = get_latest_and_prev(shares)
-
     def ratio(a, b):
         return a / b if (not np.isnan(a) and not np.isnan(b) and b != 0) else np.nan
-
     # Ratios
     roa_t = ratio(ni_t, assets_t)
     roa_t1 = ratio(ni_t1, assets_t1)
-
     cr_t = ratio(ca_t, cl_t)
     cr_t1 = ratio(ca_t1, cl_t1)
-
     lev_t = ratio(ltd_t, assets_t)
     lev_t1 = ratio(ltd_t1, assets_t1)
-
     gm_t = ratio(gp_t, rev_t)
     gm_t1 = ratio(gp_t1, rev_t1)
-
     at_t = ratio(rev_t, assets_t)
     at_t1 = ratio(rev_t1, assets_t1)
-
     # 1) ROA > 0
     if not np.isnan(roa_t):
         covered += 1
         score += 1 if roa_t > 0 else 0
-
     # 2) CFO > 0
     if not np.isnan(ocf_t):
         covered += 1
         score += 1 if ocf_t > 0 else 0
-
     # 3) ΔROA > 0
     if not np.isnan(roa_t) and not np.isnan(roa_t1):
         covered += 1
         score += 1 if roa_t > roa_t1 else 0
-
     # 4) Accrual: CFO > NI
     if not np.isnan(ocf_t) and not np.isnan(ni_t):
         covered += 1
         score += 1 if ocf_t > ni_t else 0
-
     # 5) ΔLeverage: lev baja
     if not np.isnan(lev_t) and not np.isnan(lev_t1):
         covered += 1
         score += 1 if lev_t < lev_t1 else 0
-
     # 6) ΔLiquidity: current ratio mejora
     if not np.isnan(cr_t) and not np.isnan(cr_t1):
         covered += 1
         score += 1 if cr_t > cr_t1 else 0
-
     # 7) No dilution: shares no suben
     if not np.isnan(sh_t) and not np.isnan(sh_t1):
         covered += 1
         score += 1 if sh_t <= sh_t1 else 0
-
     # 8) ΔGross margin: GM mejora
     if not np.isnan(gm_t) and not np.isnan(gm_t1):
         covered += 1
         score += 1 if gm_t > gm_t1 else 0
-
     # 9) ΔAsset turnover: AT mejora
     if not np.isnan(at_t) and not np.isnan(at_t1):
         covered += 1
         score += 1 if at_t > at_t1 else 0
-
     return score, covered
-
 # ==========================================
 # 4) ANALYZE STOCK (V7.2) - mantiene salida del endpoint
 # ==========================================
 def analyze_stock_v7(ticker):
     try:
         t = yf.Ticker(ticker)
-
         # Fast filter
         try:
             fast = t.fast_info
@@ -462,31 +412,25 @@ def analyze_stock_v7(ticker):
                 return None
         except:
             return None
-
         inc = t.income_stmt
         bal = t.balance_sheet
         cf  = t.cashflow
         if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
             return None
-
         # Orden cronológico (más reciente primero)
         inc = inc[sorted(inc.columns, reverse=True)]
         bal = bal[sorted(bal.columns, reverse=True)]
         cf  = cf[sorted(cf.columns, reverse=True)]
-
         # --- extracción fuzzy ---
         ni = get_fuzzy_series(inc, ["Net Income", "NetIncome"])
         ebit = get_fuzzy_series(inc, ["EBIT", "Operating Income"])
         ocf = get_fuzzy_series(cf,  ["Operating Cash Flow", "Total Cash From Operating Activities"])
-
         capex = get_fuzzy_series(cf, [
             "Capital Expenditures",
             "Purchase of PPE",
             "Investments in Property Plant and Equipment"
         ])
-
         equity = get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
-
         # Deuda robusta
         debt = get_fuzzy_series(bal, [
             "Total Debt",
@@ -495,82 +439,62 @@ def analyze_stock_v7(ticker):
             "Short Long Term Debt",
             "Short Term Debt"
         ])
-
         # Cash robusto
         cash = get_fuzzy_series(bal, [
             "Cash",
             "Cash And Cash Equivalents",
             "Cash Cash Equivalents And Short Term Investments"
         ])
-
         if ni.empty or ocf.empty or equity.empty:
             return None
-
         # --- valores actuales ---
         curr_ebit = safe_float(ebit.iloc[0]) if (not ebit.empty and not pd.isna(ebit.iloc[0])) else safe_float(ni.iloc[0])
         curr_eq   = safe_float(equity.iloc[0]) if not pd.isna(equity.iloc[0]) else 0.0
         curr_debt = safe_float(debt.iloc[0]) if (not debt.empty and not pd.isna(debt.iloc[0])) else 0.0
         curr_cash = safe_float(cash.iloc[0]) if (not cash.empty and not pd.isna(cash.iloc[0])) else 0.0
-
         invested_cap = curr_eq + curr_debt - curr_cash
         roic = (curr_ebit * 0.79) / invested_cap if invested_cap > 0 else 0.0
         if roic < CONFIG["MIN_ROIC"]:
             return None
-
         # ✅ Piotroski REAL (0-9) + coverage
         piotroski, pio_cov = compute_piotroski_fscore(inc, bal, cf)
-
         # Si coverage es bajo, no confiamos
         if pio_cov < CONFIG["MIN_PIO_COVERAGE"]:
             return None
-
         if piotroski < CONFIG["MIN_PIOTROSKI"]:
             return None
-
         sector = t.info.get("sector", "N/A")
-
         # --- FCF ---
         ocf_val = safe_float(ocf.iloc[0]) if not pd.isna(ocf.iloc[0]) else np.nan
         cpx_val = abs(safe_float(capex.iloc[0])) if (not capex.empty and not pd.isna(capex.iloc[0])) else 0.0
         fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
-
         # --- Growth proxy ---
         growth_proxy = min(roic * 0.5, 0.14)
         growth_proxy = max(growth_proxy, 0.03)
-
         # Terminal g por sector
         terminal_g = TERMINAL_G_BY_SECTOR.get(sector, TERMINAL_G_BY_SECTOR["N/A"])
-
         # --- DCF ---
         intrinsic = 0.0
         mos = -0.99
-
         if (not np.isnan(fcf)) and fcf > 0:
             r = CONFIG["DISCOUNT_RATE"]
-
             pv_stage1 = 0.0
             for i in range(1, 6):
                 fcf_i = fcf * ((1 + growth_proxy) ** i)
                 pv_stage1 += fcf_i / ((1 + r) ** i)
-
             if r <= terminal_g:
                 return None
-
             terminal_fcf = fcf * ((1 + growth_proxy) ** 5)
             tv = (terminal_fcf * (1 + terminal_g)) / (r - terminal_g)
             pv_tv = tv / ((1 + r) ** 5)
-
             ev = pv_stage1 + pv_tv
             equity_val = ev + curr_cash - curr_debt
             intrinsic = equity_val / shares
-
             if intrinsic > 0:
                 mos = (intrinsic - price) / intrinsic
-
         # filtro salida
         if mos < CONFIG["MARGIN_OF_SAFETY_VIEW"] and piotroski < 7:
             return None
-
         # ✅ mantener misma salida que antes (campos principales)
         return {
             'Ticker': ticker,
@@ -582,13 +506,9 @@ def analyze_stock_v7(ticker):
             'Intrinsic': intrinsic,
             'MOS': mos
         }
-
     except Exception:
         return None
-
-
 # ==========================================
-
 # 4. FUNCIÓN PRINCIPAL DE ANÁLISIS
 # ==========================================
 def run_analysis():
@@ -673,10 +593,8 @@ def run_analysis():
     save_to_cache(result)
     
     return result
-
 # -------- Flask App --------
 app = Flask(__name__)
-
 @app.route('/')
 def home():
     """Página principal con información del servicio"""
@@ -718,7 +636,6 @@ def home():
             "smart_alerts": POST_PROCESSOR_AVAILABLE
         }
     })
-
 @app.route('/analyze')
 def analyze():
     """Endpoint principal de análisis"""
@@ -758,7 +675,6 @@ def analyze():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 @app.route('/cache-status')
 def cache_status():
     """Verifica el estado del caché"""
@@ -801,7 +717,6 @@ def cache_status():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 @app.route('/clear-cache')
 def clear_cache():
     """Limpia el caché manualmente"""
@@ -825,7 +740,6 @@ def clear_cache():
     except Exception as e:
         log(f"❌ Error limpiando caché: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 @app.route('/health')
 def health():
     """Health check endpoint"""
@@ -838,7 +752,6 @@ def health():
         "portfolio_tracker_available": PORTFOLIO_TRACKER_AVAILABLE,
         "version": "8.0 - DCF 2-Stage + Quality + Portfolio Manager + Tracker"
     })
-
 @app.route('/post-process', methods=['POST'])
 def post_process_endpoint():
     """
@@ -873,7 +786,6 @@ def post_process_endpoint():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 @app.route('/follow', methods=['POST'])
 def follow_endpoint():
     """
@@ -963,76 +875,312 @@ def follow_endpoint():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 @app.route('/refine', methods=['GET'])
 def refine_endpoint():
     """
-    Endpoint para Portfolio Manager Review
-    Toma los datos del último análisis (caché o ejecuta nuevo) y los refina
+    Endpoint de refinamiento (Analyst AI V7)
+    Toma los datos del último análisis (caché o ejecuta nuevo) y genera
+    recomendaciones JOYAS-only + plan de salida (6M/12M), manteniendo
+    la MISMA estructura de salida del endpoint.
     """
-    if not PORTFOLIO_REFINER_AVAILABLE:
-        return jsonify({
-            "error": "Portfolio Refiner not available"
-        }), 503
-    
     try:
         log("\n" + "="*60)
-        log("🧠 Portfolio Manager Review")
+        log("🎩 Analyst AI V7 (Refine)")
         log("="*60)
-        
-        # 1. Intentar obtener datos del caché primero
-        log("📂 Buscando datos en caché...")
-        cached_data = get_full_cached_data()
-        
-        if cached_data:
+        # 1) Obtener data base (caché o ejecutar nuevo)
+        cached_data = get_cached_results()
+        if cached_data is not None and isinstance(cached_data, dict) and cached_data.get('results'):
             log("✅ Datos encontrados en caché")
             data = cached_data
         else:
-            # 2. Si no hay caché, ejecutar análisis nuevo
             log("⚠️  No hay caché, ejecutando análisis nuevo...")
             data = run_analysis()
-        
-        # 3. Verificar que tenemos resultados
+        # 2) Verificar que tenemos resultados
         if not data:
             log("❌ No hay resultados para refinar")
             return jsonify({
                 "error": "No analysis results available. Run /analyze first."
             }), 404
-        
-        # 4. Verificar formato de datos
-        # Si data tiene 'results', lo usamos directamente
-        # Si data es una lista, necesitamos construir el objeto
+        # 3) Normalizar formato
         if isinstance(data, list):
-            # Es solo la lista de results, construir objeto completo
             data_obj = {'results': data}
         elif isinstance(data, dict) and 'results' in data:
             data_obj = data
         else:
             log("❌ Formato de datos inválido")
-            return jsonify({
-                "error": "Invalid data format"
-            }), 500
-        
-        # 5. Refinar los datos
-        candidates_count = len(data_obj.get('results', [])) if isinstance(data_obj.get('results'), list) else data_obj.get('candidates_count', 0)
-        log(f"🔍 Refinando {candidates_count} candidatos...")
-        
-        refiner = PortfolioRefiner(data_obj)
-        refined_data = refiner.refine_all()
-        
-        if refined_data is None:
-            log("❌ Error en refinamiento")
-            return jsonify({
-                "error": "Failed to refine data"
-            }), 500
-        
-        log("✅ Refinamiento completado exitosamente")
+            return jsonify({"error": "Invalid data format"}), 500
+        results_list = data_obj.get('results', [])
+        if not isinstance(results_list, list) or len(results_list) == 0:
+            log("❌ Lista de resultados vacía")
+            return jsonify({"error": "No results to refine"}), 404
+        # 4) Convertir a DataFrame (input del Analyst)
+        df_input = pd.DataFrame(results_list)
+        # =========================
+        # Analyst AI 3.7 (JOYAS-only)
+        # =========================
+        def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataFrame:
+            """
+            Selecciona SOLO oportunidades de alta convicción ("JOYAS"),
+            con gates estrictos y lógica anti-trampas (especialmente DEFENSIVE).
+            - No usa Top N. Pasa/falla por umbrales.
+            - Por defecto devuelve SOLO STRONG BUY / BUY.
+            - return_all=True devuelve WATCH/AVOID también.
+            """
+            required_cols = [
+                "Ticker","Price","Sector","ROIC","Piotroski","Growth_Est","Terminal_g",
+                "Intrinsic","MOS","FCF","Debt","Cash","MarketCap","Debt_to_MCap","FCF_Yield","DCF_TV_Weight"
+            ]
+            missing = [c for c in required_cols if c not in df_input.columns]
+            if missing:
+                raise ValueError(f"Faltan columnas requeridas en el df de entrada: {missing}")
+            df = df_input.copy()
+            # Normalización numérica
+            num_cols = [
+                "Price","ROIC","Piotroski","Growth_Est","Terminal_g","Intrinsic","MOS",
+                "FCF","Debt","Cash","MarketCap","Debt_to_MCap","FCF_Yield","DCF_TV_Weight"
+            ]
+            for c in num_cols:
+                df[c] = pd.to_numeric(df[c], errors="coerce").replace([np.inf, -np.inf], np.nan)
+            df["Sector"] = df["Sector"].fillna("N/A").astype(str)
+            df["Ticker"] = df["Ticker"].astype(str)
+            # Buckets sectoriales
+            DEFENSIVE = {"Consumer Defensive","Utilities","Healthcare"}
+            CYCLICAL  = {"Consumer Cyclical","Industrials","Basic Materials","Energy","Real Estate"}
+            GROWTH    = {"Technology","Communication Services"}
+            def sector_bucket(sector: str) -> str:
+                if sector in DEFENSIVE: return "DEFENSIVE"
+                if sector in CYCLICAL:  return "CYCLICAL"
+                if sector in GROWTH:    return "GROWTH"
+                return "OTHER"
+            # Dedup por issuer (clases)
+            def issuer_key(ticker: str) -> str:
+                t = ticker.upper()
+                for suf in ["-A","-B","-C",".A",".B",".C"]:
+                    if t.endswith(suf):
+                        t = t[: -len(suf)]
+                if t in {"FOXA","FOX"}: return "FOX"
+                if t in {"GOOGL","GOOG"}: return "GOOG"
+                return t
+            # Config institucional (estricta)
+            CFG = {
+                "MIN_PIO_BUY": 6,
+                "MIN_PIO_STRONG": 7,
+                "MIN_ROIC_BUY": 0.10,
+                "MIN_ROIC_STRONG": 0.12,
+                "MAX_TVW_BUY": 0.80,
+                "MAX_TVW_STRONG": 0.77,
+                "MAX_DTM_BUY": 1.0,
+                "MAX_DTM_STRONG": 0.9,
+                "MOS_BUY":    {"DEFENSIVE":0.36, "CYCLICAL":0.34, "GROWTH":0.30, "OTHER":0.32},
+                "MOS_STRONG": {"DEFENSIVE":0.44, "CYCLICAL":0.42, "GROWTH":0.38, "OTHER":0.40},
+                "FCFY_BUY":    {"DEFENSIVE":0.085, "CYCLICAL":0.055, "GROWTH":0.045, "OTHER":0.055},
+                "FCFY_STRONG": {"DEFENSIVE":0.100, "CYCLICAL":0.065, "GROWTH":0.055, "OTHER":0.065},
+                "UP_BUY": 0.55,
+                "UP_STRONG": 0.85,
+                "DEF_MAX_GROWTH_EST": 0.10,
+                "REQUIRE_POSITIVE_FCF": True,
+            }
+            def mos_penalty(dtm, tvw):
+                pen = 0.0
+                if not pd.isna(dtm):
+                    if dtm >= 1.2: pen += 0.06
+                    elif dtm >= 1.0: pen += 0.03
+                if not pd.isna(tvw):
+                    if tvw >= 0.85: pen += 0.07
+                    elif tvw >= 0.80: pen += 0.04
+                return pen
+            out = []
+            for _, r in df.iterrows():
+                ticker = r["Ticker"]
+                sector = r["Sector"]
+                bucket = sector_bucket(sector)
+                price = r["Price"]
+                fair  = r["Intrinsic"]  # ← fair value DCF
+                roic = r["ROIC"]
+                pio  = r["Piotroski"]
+                fcf  = r["FCF"]
+                fcfy = r["FCF_Yield"]
+                dtm  = r["Debt_to_MCap"]
+                tvw  = r["DCF_TV_Weight"]
+                g_est = r["Growth_Est"]
+                t_g   = r["Terminal_g"]
+                # Financieras fuera de DCF
+                if sector == "Financial Services":
+                    if return_all:
+                        out.append({
+                            "Ticker": ticker, "Issuer": issuer_key(ticker), "Sector": sector, "Bucket": bucket,
+                            "Price": price, "Target_Fair": np.nan, "Upside": np.nan, "Real_MOS": np.nan,
+                            "Action": "VALUAR P/B", "Cat": "🏦 Banco/Seguro",
+                            "Flags": "DCF_NA",
+                            "Why": "Bancos/seguros: usar P/B + ROE + calidad de balance.",
+                            "DCF_TV_Weight": tvw, "Debt_to_MCap": dtm, "FCF_Yield": fcfy, "Piotroski": pio, "ROIC": roic
+                        })
+                    continue
+                # sanity
+                if pd.isna(price) or pd.isna(fair) or price <= 0 or fair <= 0:
+                    continue
+                upside = (fair - price) / price
+                real_mos = (fair - price) / fair
+                flags, why = [], []
+                # FCF positivo obligatorio
+                fcf_ok = (not pd.isna(fcf)) and (fcf > 0)
+                if CFG["REQUIRE_POSITIVE_FCF"] and (not fcf_ok):
+                    flags.append("FCF_NEG")
+                mos_req_buy    = CFG["MOS_BUY"][bucket]    + mos_penalty(dtm, tvw)
+                mos_req_strong = CFG["MOS_STRONG"][bucket] + mos_penalty(dtm, tvw)
+                fcfy_req_buy    = CFG["FCFY_BUY"][bucket]
+                fcfy_req_strong = CFG["FCFY_STRONG"][bucket]
+                # Anti-trampa defensivos
+                defensive_trap = False
+                if bucket == "DEFENSIVE":
+                    if (not pd.isna(g_est)) and (g_est > CFG["DEF_MAX_GROWTH_EST"]):
+                        defensive_trap = True
+                        flags.append("DEF_GROWTH_IMPLAUSIBLE")
+                    if (not pd.isna(pio)) and (pio <= 5):
+                        defensive_trap = True
+                        flags.append("DEF_LOW_PIO")
+                    if (pd.isna(fcfy)) or (fcfy < fcfy_req_buy):
+                        flags.append("DEF_FCFY_LOW")
+                # Fragilidad DCF
+                if (not pd.isna(tvw)) and (tvw > 0.85):
+                    flags.append("TV_HEAVY")
+                base_ok_buy = (
+                    (not pd.isna(pio)) and (pio >= CFG["MIN_PIO_BUY"]) and
+                    (not pd.isna(roic)) and (roic >= CFG["MIN_ROIC_BUY"]) and
+                    (not pd.isna(fcfy)) and (fcfy >= fcfy_req_buy) and
+                    (not pd.isna(dtm)) and (dtm <= CFG["MAX_DTM_BUY"]) and
+                    (not pd.isna(tvw)) and (tvw <= CFG["MAX_TVW_BUY"]) and
+                    fcf_ok and
+                    (real_mos >= mos_req_buy) and
+                    (upside >= CFG["UP_BUY"]) and
+                    (not defensive_trap)
+                )
+                base_ok_strong = (
+                    (not pd.isna(pio)) and (pio >= CFG["MIN_PIO_STRONG"]) and
+                    (not pd.isna(roic)) and (roic >= CFG["MIN_ROIC_STRONG"]) and
+                    (not pd.isna(fcfy)) and (fcfy >= fcfy_req_strong) and
+                    (not pd.isna(dtm)) and (dtm <= CFG["MAX_DTM_STRONG"]) and
+                    (not pd.isna(tvw)) and (tvw <= CFG["MAX_TVW_STRONG"]) and
+                    fcf_ok and
+                    (real_mos >= mos_req_strong) and
+                    (upside >= CFG["UP_STRONG"]) and
+                    (not defensive_trap)
+                )
+                action, cat = "AVOID", "❌ No pasa filtros"
+                if base_ok_strong:
+                    action, cat = "STRONG BUY", "💎 JOYA REAL"
+                    why.append("Pasa gates estrictos (calidad + robustez + riesgo controlado).")
+                elif base_ok_buy:
+                    action, cat = "BUY", "✅ Oportunidad"
+                    why.append("Pasa gates institucionales (MOS/FCFY + riesgo controlado).")
+                else:
+                    if (real_mos >= 0.18) and (upside >= 0.30):
+                        action, cat = "WATCH", "⚖️ Casi, pero no"
+                        why.append("Hay descuento, pero no alcanza robustez/calidad/riesgo para compra.")
+                if (not return_all) and (action not in {"STRONG BUY","BUY"}):
+                    continue
+                out.append({
+                    "Ticker": ticker,
+                    "Issuer": issuer_key(ticker),
+                    "Sector": sector,
+                    "Bucket": bucket,
+                    "Price": price,
+                    "Target_Fair": fair,
+                    "Upside": upside,
+                    "Real_MOS": real_mos,
+                    "Piotroski": pio,
+                    "ROIC": roic,
+                    "FCF_Yield": fcfy,
+                    "Debt_to_MCap": dtm,
+                    "DCF_TV_Weight": tvw,
+                    "Growth_Est": g_est,
+                    "Terminal_g": t_g,
+                    "Action": action,
+                    "Cat": cat,
+                    "Flags": ",".join(sorted(set(flags))),
+                    "Why": " ".join(why) if why else ""
+                })
+            res = pd.DataFrame(out)
+            if res.empty:
+                return res
+            # Dedup por issuer: mejor acción, luego upside
+            action_rank = {"STRONG BUY": 0, "BUY": 1, "WATCH": 2, "AVOID": 3, "VALUAR P/B": 4}
+            res["_ar"] = res["Action"].map(action_rank).fillna(99)
+            res = res.sort_values(by=["_ar","Upside"], ascending=[True, False])
+            res = res.drop_duplicates(subset=["Issuer"], keep="first").drop(columns=["_ar"])
+            # Orden final
+            res["_ar2"] = res["Action"].map(action_rank).fillna(99)
+            res = res.sort_values(by=["_ar2","Upside"], ascending=[True, False]).drop(columns=["_ar2"])
+            return res
+        # =========================
+        # EXIT PLAN: Target 6M / 12M + Trim/Stop
+        # =========================
+        def add_exit_plan(df_rec: pd.DataFrame) -> pd.DataFrame:
+            """
+            Construye targets de salida realistas (6m y 12m) usando convergencia parcial al fair value,
+            penalizando fragilidad del DCF (TV weight alto). Agrega trim y stop.
+            """
+            if df_rec is None or df_rec.empty:
+                return df_rec
+            dfp = df_rec.copy()
+            price = pd.to_numeric(dfp["Price"], errors="coerce")
+            fair  = pd.to_numeric(dfp["Target_Fair"], errors="coerce")
+            tvw   = pd.to_numeric(dfp["DCF_TV_Weight"], errors="coerce")
+            # Penalización por TV weight (fragilidad del fair)
+            # (mientras más TVW, más conservador el target)
+            tv_penalty = np.where(tvw >= 0.78, 0.90, np.where(tvw >= 0.74, 0.95, 1.00))
+            dfp["TV_Penalty"] = tv_penalty
+            gap = (fair - price).clip(lower=0)
+            # Convergencia parcial por horizonte y tipo de acción
+            # 6m: más conservador
+            conv6 = np.where(dfp["Action"].eq("STRONG BUY"), 0.60,
+                    np.where(dfp["Action"].eq("BUY"),        0.45, 0.40))
+            # 12m: más “tesis”
+            conv12 = np.where(dfp["Action"].eq("STRONG BUY"), 0.80,
+                     np.where(dfp["Action"].eq("BUY"),        0.65, 0.55))
+            dfp["Conv_6M"] = conv6
+            dfp["Conv_12M"] = conv12
+            # Targets base
+            tgt6  = price + gap * dfp["Conv_6M"]  * dfp["TV_Penalty"]
+            tgt12 = price + gap * dfp["Conv_12M"] * dfp["TV_Penalty"]
+            # Caps de upside para no pedir imposibles (operativo)
+            cap6  = np.where(dfp["Action"].eq("STRONG BUY"), 1.20, 0.90)  # 120% vs 90%
+            cap12 = np.where(dfp["Action"].eq("STRONG BUY"), 1.80, 1.40)  # 180% vs 140%
+            dfp["Target_6M"]  = np.minimum(tgt6,  price * (1 + cap6))
+            dfp["Target_12M"] = np.minimum(tgt12, price * (1 + cap12))
+            dfp["Upside_6M"]  = (dfp["Target_6M"]  - price) / price
+            dfp["Upside_12M"] = (dfp["Target_12M"] - price) / price
+            # Trim y Stop (simple sin ATR)
+            # Trim_6M: toma parcial al 70% del camino al Target_6M
+            dfp["Trim_6M"] = price + (dfp["Target_6M"] - price) * 0.70
+            # Stop: STRONG -12%, BUY -10%
+            stop_pct = np.where(dfp["Action"].eq("STRONG BUY"), 0.12, 0.10)
+            dfp["Stop_Price"] = price * (1 - stop_pct)
+            # Reordenar columnas principales
+            cols_front = [
+                "Ticker","Action","Cat","Bucket",
+                "Price","Target_Fair","Target_6M","Target_12M",
+                "Upside","Upside_6M","Upside_12M","Real_MOS",
+                "Trim_6M","Stop_Price",
+                "Piotroski","ROIC","FCF_Yield","Debt_to_MCap","DCF_TV_Weight",
+                "Conv_6M","Conv_12M","TV_Penalty",
+                "Flags","Why"
+            ]
+            cols_front = [c for c in cols_front if c in dfp.columns]
+            cols_rest = [c for c in dfp.columns if c not in cols_front]
+            return dfp[cols_front + cols_rest]
+        # 5) Ejecutar refinamiento
+        log("🧠 Analyst AI 3.7: Joyas-only...")
+        df_final_371 = analyst_ai_v37(df_input, return_all=False)
+        df_final_371 = add_exit_plan(df_final_371)
+        refined_records = []
+        if df_final_371 is not None and not df_final_371.empty:
+            refined_records = df_final_371.replace({np.nan: None}).to_dict('records')
+        log(f"✅ Refinamiento completado (joyas={len(refined_records)})")
         log("="*60)
-        
-        # 6. Retornar respuesta
         response_data = {
             "status": "success",
-            "refined_data": refined_data,
+            "refined_data": refined_records,
             "refined_at": datetime.now().isoformat(),
             "original_analysis": {
                 "generated_at": data_obj.get('generated_at'),
@@ -1041,15 +1189,12 @@ def refine_endpoint():
                 "from_cache": data_obj.get('from_cache', False)
             }
         }
-        
         return jsonify(response_data)
-        
     except Exception as e:
         log(f"❌ Error en refinamiento: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     log(f"🚀 Iniciando Warren Screener v8 en puerto {port}")
