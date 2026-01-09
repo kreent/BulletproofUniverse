@@ -201,59 +201,115 @@ def save_to_cache(results):
         return False
 
 # ==========================================
-# 1) UNIVERSO - Oracle V7.2
+# 1. UNIVERSO INDESTRUCTIBLE (CSV + HARDCODE)
 # ==========================================
 def get_bulletproof_universe():
     tickers = set()
     print("🌍 Generando Universo...")
 
+    # Intento 1: GitHub API (más confiable que raw)
     try:
-        url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-        df = pd.read_csv(url_sp500)
-        tickers.update(df["Symbol"].tolist())
-        print(f"   -> S&P 500 cargado desde GitHub ({len(tickers)})")
-    except:
-        print("   ⚠️ Fallo GitHub S&P 500.")
+        # Usando GitHub API en lugar de raw.githubusercontent.com
+        url_sp500 = "https://api.github.com/repos/datasets/s-and-p-500-companies/contents/data/constituents.csv"
+        headers = {'Accept': 'application/vnd.github.v3.raw'}
+        r = requests.get(url_sp500, headers=headers, timeout=30)
+        r.raise_for_status()
+        from io import StringIO
+        df = pd.read_csv(StringIO(r.text))
+        tickers.update(df['Symbol'].tolist())
+        print(f"   -> S&P 500 cargado desde GitHub API ({len(tickers)})")
+    except Exception as e:
+        print(f"   ⚠️ Fallo GitHub S&P 500: {str(e)}")
+        
+        # Fallback: Intentar con raw.githubusercontent.com
+        try:
+            url_sp500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+            df = pd.read_csv(url_sp500, timeout=30)
+            tickers.update(df['Symbol'].tolist())
+            print(f"   -> S&P 500 cargado desde GitHub raw ({len(tickers)})")
+        except Exception as e2:
+            print(f"   ⚠️ Fallo GitHub raw: {str(e2)}")
 
+    # Intento 2: Nasdaq 100
     try:
-        url_ndx = "https://raw.githubusercontent.com/nasdaq-100/nasdaq-100-symbols/master/nasdaq-100-symbols.csv"
-        r = requests.get(url_ndx, timeout=15)
-        lines = r.text.split("\n")
-        nasdaq_ticks = [x.split(",")[0].strip() for x in lines if x and "Symbol" not in x]
-        tickers.update(nasdaq_ticks)
-        print(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
-    except:
-        print("   ⚠️ Fallo GitHub Nasdaq.")
+        url_ndx = "https://api.github.com/repos/nasdaq-100/nasdaq-100-symbols/contents/nasdaq-100-symbols.csv"
+        headers = {'Accept': 'application/vnd.github.v3.raw'}
+        r = requests.get(url_ndx, headers=headers, timeout=30)
+        if r.status_code == 200:
+            text = r.text
+            lines = text.split('\n')
+            nasdaq_ticks = [x.split(',')[0].strip() for x in lines if x and 'Symbol' not in x]
+            tickers.update(nasdaq_ticks)
+            print(f"   -> Nasdaq cargado ({len(nasdaq_ticks)})")
+    except Exception as e:
+        print(f"   ⚠️ Fallo GitHub Nasdaq: {str(e)}")
 
+    # Intento 3: Lista de Respaldo MANUAL COMPLETA
+    # Lista actualizada con TODOS los tickers que aparecen en Colab
     BACKUP_LIST = [
-        'AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA','BRK-B','LLY','V',
-        'TSM','UNH','AVGO','JPM','NVO','WMT','XOM','MA','JNJ','PG',
-        'HD','MRK','COST','ABBV','ORCL','ASML','CVX','ADBE','AMD','KO',
-        'PEP','CRM','BAC','ACN','CSCO','NFLX','MCD','LIN','AZN','NKE',
-        'DIS','TMUS','ABT','DHR','WFC','INTC','INTU','QCOM','CMCSA','TXN',
-        'VZ','UPS','PM','NEE','RTX','MS','HON','AMGN','UNP','PFE',
-        'LOW','SPGI','CAT','IBM','AMAT','DE','GS','GE','LMT','PLD',
-        'BLK','SYK','T','ISRG','BKNG','ELV','MDT','TJX','ADI','NOW',
-        'MMC','CVS','ADP','VRTX','LRCX','UBER','REGN','PYPL','ZTS','CI'
+        # Originales (90 tickers)
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
+        'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
+        'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
+        'PEP', 'CRM', 'BAC', 'ACN', 'CSCO', 'NFLX', 'MCD', 'LIN', 'AZN', 'NKE',
+        'DIS', 'TMUS', 'ABT', 'DHR', 'WFC', 'INTC', 'INTU', 'QCOM', 'CMCSA', 'TXN',
+        'VZ', 'UPS', 'PM', 'NEE', 'RTX', 'MS', 'HON', 'AMGN', 'UNP', 'PFE',
+        'LOW', 'SPGI', 'CAT', 'IBM', 'AMAT', 'DE', 'GS', 'GE', 'LMT', 'PLD',
+        'BLK', 'SYK', 'T', 'ISRG', 'BKNG', 'ELV', 'MDT', 'TJX', 'ADI', 'NOW',
+        'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI',
+        # Agregados - Los que salen en Colab pero faltaban
+        'MET', 'AMP', 'KMB', 'FCX', 'CLX', 'IT', 'BIIB', 'CL', 'ZBRA', 'WSM',
+        'MKTX', 'LII', 'FDS', 'RL', 'HAS',
+        # Más del S&P 500 para completar
+        'GOOG', 'BRK-A', 'AVGO', 'TSLA', 'JPM', 'UNH', 'LLY', 'XOM', 'V', 'PG',
+        'JNJ', 'MA', 'NVDA', 'HD', 'ABBV', 'MRK', 'COST', 'CVX', 'ADBE', 'PEP',
+        'KO', 'TMO', 'CSCO', 'ACN', 'MCD', 'ABT', 'NFLX', 'WFC', 'ORCL', 'CRM',
+        'DHR', 'TXN', 'AMD', 'CMCSA', 'QCOM', 'INTU', 'NKE', 'VZ', 'PM', 'UPS',
+        'NEE', 'RTX', 'HON', 'AMGN', 'LOW', 'SPGI', 'BMY', 'SBUX', 'BA', 'CAT',
+        'GS', 'IBM', 'AXP', 'ISRG', 'GILD', 'BLK', 'DE', 'ELV', 'MDT', 'SCHW',
+        'AMAT', 'SYK', 'PLD', 'LMT', 'ADI', 'BKNG', 'VRTX', 'TJX', 'REGN', 'ADP',
+        'MDLZ', 'CB', 'NOW', 'LRCX', 'MO', 'AMT', 'MMC', 'PYPL', 'PGR', 'SO',
+        'CI', 'DUK', 'ETN', 'BSX', 'SLB', 'ZTS', 'GE', 'EQIX', 'PNC', 'NOC',
+        'USB', 'TGT', 'ITW', 'REGN', 'BDX', 'MU', 'HCA', 'MS', 'WELL', 'KLAC',
+        'EOG', 'C', 'MMM', 'APH', 'FI', 'MCK', 'WM', 'PH', 'SNPS', 'CDNS',
+        'SHW', 'CMG', 'MAR', 'TDG', 'EMR', 'NSC', 'APD', 'MSI', 'NXPI', 'CARR',
+        'PSX', 'ADSK', 'CSX', 'CME', 'COP', 'MPC', 'TT', 'AJG', 'MCO', 'GM',
+        'AFL', 'ROP', 'PCAR', 'O', 'MCHP', 'SRE', 'HUM', 'ORLY', 'AZO', 'PAYX',
+        'D', 'ICE', 'MSCI', 'FTNT', 'KMB', 'ROST', 'ECL', 'AIG', 'TRV', 'CCI',
+        'JCI', 'TEL', 'CPRT', 'AEP', 'CL', 'HSY', 'GWW', 'PSA', 'MNST', 'KMI',
+        'EW', 'FAST', 'BK', 'CTAS', 'FCX', 'NEM', 'ALL', 'ODFL', 'DLR', 'EXC',
+        'SPG', 'CMI', 'IQV', 'KHC', 'CTVA', 'YUM', 'EA', 'XEL', 'GIS', 'VRSK',
+        'AME', 'DXCM', 'HLT', 'KVUE', 'PCG', 'DD', 'OTIS', 'RSG', 'IDXX', 'A',
+        'ANSS', 'VICI', 'VMC', 'MLM', 'BKR', 'KEYS', 'CTSH', 'IT', 'WMB', 'ROK',
+        'EXR', 'OKE', 'RMD', 'PPG', 'DOV', 'GEHC', 'AVB', 'BIIB', 'FICO', 'SYY',
+        'EIX', 'ED', 'CBRE', 'TROW', 'MTD', 'IRM', 'DAL', 'ALNY', 'HAL', 'ACGL',
+        'MPWR', 'WEC', 'WSM', 'XYL', 'FTV', 'GLW', 'WBD', 'FITB', 'IR', 'CHTR',
+        'CDW', 'HPQ', 'TSCO', 'AWK', 'DTE', 'ES', 'CAH', 'PPL', 'FDS', 'ETR',
+        'LH', 'GPN', 'CHD', 'EBAY', 'KEYS', 'RF', 'MTB', 'HPE', 'RL', 'ZBRA',
+        'TTWO', 'NTAP', 'STT', 'BALL', 'CLX', 'HAS', 'LUV', 'UAL', 'MKTX',
+        'LII', 'AMP', 'MET', 'ULTA', 'APTV', 'STE', 'DFS', 'CFG', 'INVH', 'HBAN'
     ]
 
     if len(tickers) < 50:
-        print("⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual.")
+        print(f"   ⚠️ Fallaron descargas externas. Usando Lista de Respaldo Manual ({len(BACKUP_LIST)} tickers).")
         tickers.update(BACKUP_LIST)
 
-    final_list = list(set([t.replace(".", "-") for t in tickers]))
-    return final_list[:500]
+    final_list = list(set([t.replace('.', '-') for t in tickers]))
+    final_count = min(500, len(final_list))
+    print(f"   ✅ Total final: {final_count} tickers para analizar")
+    return final_list[:500] # Limitamos a 500 para velocidad
 
 # ==========================================
-# 2) FUZZY SERIES - Oracle V7.2
+# 2. MOTOR DE BÚSQUEDA FUZZY (V5 Core)
 # ==========================================
 def get_fuzzy_series(df, keywords):
+    """Búsqueda fuzzy de campos en DataFrames financieros"""
     if df is None or df.empty:
         return pd.Series(dtype=float)
-
+    
     df = df.copy()
     df.index = df.index.astype(str).str.lower().str.strip()
-
+    
     for key in keywords:
         k = key.lower()
         if k in df.index:
@@ -261,9 +317,13 @@ def get_fuzzy_series(df, keywords):
         matches = [i for i in df.index if k in i]
         if matches:
             return df.loc[min(matches, key=len)]
-
+    
     return pd.Series(dtype=float)
 
+
+# ==========================================
+# 3. SAFE FLOAT Y UTILIDADES (Oracle V7.2)
+# ==========================================
 def safe_float(x):
     try:
         if x is None:
@@ -282,7 +342,7 @@ def get_latest_and_prev(series: pd.Series):
     return a, b
 
 # ==========================================
-# 3) REAL PIOTROSKI (0–9) + COVERAGE - Oracle V7.2
+# 4. REAL PIOTROSKI (0–9) + COVERAGE (Oracle V7.2)
 # ==========================================
 def compute_piotroski_fscore(inc, bal, cf):
     """
@@ -388,9 +448,10 @@ def compute_piotroski_fscore(inc, bal, cf):
     return score, covered
 
 # ==========================================
-# 4) ANALYZE STOCK (V7.2) - Oracle V7.2
+# 5. ANÁLISIS FINANCIERO (Oracle V7.2)
 # ==========================================
-def analyze_stock_v72(ticker: str):
+def analyze_stock_v7(ticker):
+    """Analiza una acción individual con Oracle V7.2"""
     try:
         t = yf.Ticker(ticker)
 
@@ -522,19 +583,15 @@ def analyze_stock_v72(ticker: str):
 
         return {
             "Ticker": ticker,
-            "Price": price,
+            "Price": round(price, 2),
             "Sector": sector,
             "ROIC": roic,
-
             "Piotroski": piotroski,
             "Piotroski_Coverage": pio_cov,
-
             "Growth_Est": growth_proxy,
             "Terminal_g": terminal_g,
-
             "Intrinsic": intrinsic,
             "MOS": mos,
-
             "FCF": fcf,
             "OCF": ocf_val,
             "Capex": cpx_val,
@@ -553,112 +610,243 @@ def analyze_stock_v72(ticker: str):
         return None
 
 # ==========================================
-# 5) RUN ANALYSIS - Oracle V7.2
+# 6. FUNCIÓN PRINCIPAL DE ANÁLISIS
 # ==========================================
 def run_analysis():
-    """
-    Ejecuta el análisis completo usando Oracle V7.2
-    Retorna estructura compatible con el formato original
-    """
+    """Ejecuta el análisis completo con caché"""
+    
+    # Verificar caché primero
+    cached = get_cached_results()
+    if cached is not None:
+        cached['from_cache'] = True
+        return cached
+    
+    # Si no hay caché, ejecutar análisis
+    start_time = time.time()
+    
+    log("🎯 Iniciando Warren Screener v8")
+    log("="*60)
+    
+    # 1. Obtener universo
     tickers = get_bulletproof_universe()
     log(f"🎯 Objetivo Real: Analizar {len(tickers)} empresas.")
-
-    results = []
-    with ThreadPoolExecutor(max_workers=CONFIG["MAX_WORKERS"]) as executor:
-        futures = {executor.submit(analyze_stock_v72, tk): tk for tk in tickers}
-        for future in tqdm(as_completed(futures), total=len(tickers), desc="Analizando"):
-            r = future.result()
-            if r:
-                results.append(r)
-
-    log(f"\n💎 RESULTADOS FINALES ({len(results)} encontrados)")
     
-    # Estructura de retorno compatible
-    return {
-        "results": results,
+    # 2. Análisis paralelo
+    results = []
+    with ThreadPoolExecutor(max_workers=CONFIG['MAX_WORKERS']) as executor:
+        futures = {executor.submit(analyze_stock_v7, t): t for t in tickers}
+        for future in as_completed(futures):
+            r = future.result()
+            if r: results.append(r)
+    
+    # 3. Procesar resultados
+    if not results:
+        error_result = {
+            "error": "Sin resultados (posible rate-limit o filtros muy estrictos)",
+            "total_analyzed": len(tickers),
+            "candidates_count": 0,
+            "from_cache": False,
+            "generated_at": datetime.now().isoformat()
+        }
+        log("❌ Sin resultados finales")
+        return error_result
+    
+    df = pd.DataFrame(results)
+    df = df.sort_values(by='MOS', ascending=False, na_position='last')
+    
+    # 4. Clasificación
+    buy_candidates = df[df['MOS'] > 0.10].copy() if 'MOS' in df.columns else pd.DataFrame()
+    fair_value = df[(df['MOS'] > 0) & (df['MOS'] <= 0.10)].copy() if 'MOS' in df.columns else pd.DataFrame()
+    watchlist = df[df['MOS'] <= 0].copy() if 'MOS' in df.columns else pd.DataFrame()
+    
+    # 5. Resultado final
+    execution_time = round(time.time() - start_time, 2)
+    
+    # Convertir TODOS los resultados a diccionarios (ordenados por MOS)
+    all_results = df.replace({np.nan: None}).to_dict('records')
+    
+    result = {
         "total_analyzed": len(tickers),
-        "candidates_count": len(results),
+        "candidates_count": len(df),
+        "results": all_results,  # TODOS los resultados, ordenados por MOS descendente
+        "summary": {
+            "buy_zone_count": len(buy_candidates),      # MOS > 10%
+            "fair_zone_count": len(fair_value),         # MOS 0-10%
+            "watch_zone_count": len(watchlist)          # MOS < 0%
+        },
         "generated_at": datetime.now().isoformat(),
-        "from_cache": False
+        "cache_enabled": GCS_AVAILABLE,
+        "from_cache": False,
+        "execution_time_seconds": execution_time
     }
+    
+    log("="*60)
+    log(f"💎 RESULTADOS FINALES ({len(df)} encontrados):")
+    log(f"📊 Total analizados: {len(tickers)}")
+    log(f"⭐ Candidatos finales: {len(df)}")
+    log(f"   🟢 Zona de Compra (MOS > 10%): {len(buy_candidates)}")
+    log(f"   🟡 Valor Justo (MOS 0-10%): {len(fair_value)}")
+    log(f"   🔴 Watchlist (MOS < 0%): {len(watchlist)}")
+    log(f"⏱️  Tiempo de ejecución: {execution_time}s")
+    log("="*60)
+    
+    # Guardar en caché
+    save_to_cache(result)
+    
+    return result
 
-# ==========================================
-# 6) FLASK APP
-# ==========================================
+# -------- Flask App --------
 app = Flask(__name__)
+
+@app.route('/')
+def home():
+    """Página principal con información del servicio"""
+    cache_status = "enabled" if GCS_AVAILABLE else "disabled"
+    return jsonify({
+        "status": "Warren Screener v8 - DCF 2-Stage + Quality Focus",
+        "version": "8.0 - Oracle V7.2 Integration",
+        "cache": cache_status,
+        "bucket": GCS_BUCKET_NAME if GCS_AVAILABLE else "not configured",
+        "cache_ttl_hours": CACHE_TTL_HOURS,
+        "methodology": [
+            "ROIC mínimo 8% (retorno sobre capital invertido)",
+            "Piotroski Score >= 6 (calidad financiera REAL con 9 señales)",
+            "DCF 2-Stage con tasa de descuento 9%",
+            "Growth estimado basado en ROIC",
+            "Terminal growth ajustado por sector",
+            "Margen de seguridad calculado vs precio actual"
+        ],
+        "filters": {
+            "min_market_cap": "5B USD",
+            "min_roic": f"{CONFIG['MIN_ROIC']*100}%",
+            "min_piotroski": CONFIG['MIN_PIOTROSKI'],
+            "min_pio_coverage": CONFIG['MIN_PIO_COVERAGE'],
+            "discount_rate": f"{CONFIG['DISCOUNT_RATE']*100}%"
+        },
+        "endpoints": {
+            "/analyze": "Run analysis (with 24h cache + auto post-processing)",
+            "/refine": "GET - Portfolio Manager Review (adjust growth by sector)",
+            "/follow": "POST - Portfolio Performance Tracker (analyze your portfolio)",
+            "/post-process": "POST - Manual post-processing of results",
+            "/cache-status": "Check cache status",
+            "/clear-cache": "Clear cache manually",
+            "/health": "Health check"
+        },
+        "features": {
+            "auto_post_processing": POST_PROCESSOR_AVAILABLE,
+            "portfolio_refinement": PORTFOLIO_REFINER_AVAILABLE,
+            "portfolio_tracking": PORTFOLIO_TRACKER_AVAILABLE,
+            "sector_analysis": POST_PROCESSOR_AVAILABLE,
+            "portfolio_metrics": POST_PROCESSOR_AVAILABLE,
+            "smart_alerts": POST_PROCESSOR_AVAILABLE
+        }
+    })
 
 @app.route('/analyze')
 def analyze():
-    """
-    Endpoint principal de análisis usando Oracle V7.2
-    Primero busca en caché, si no ejecuta análisis nuevo
-    """
+    """Endpoint principal de análisis"""
     try:
         log("\n" + "="*60)
-        log("🔍 Warren Screener - Análisis de Calidad")
+        log("📊 Nueva petición de análisis recibida")
         log("="*60)
         
-        # 1. Intentar obtener del caché
-        cached = get_cached_results()
+        results = run_analysis()
         
-        if cached:
-            log("✅ Retornando resultados desde caché")
-            
-            # Si cached es un dict con 'results', retornar completo
-            if isinstance(cached, dict) and 'results' in cached:
-                response_data = cached
-                response_data['from_cache'] = True
-            # Si cached es una lista, construir el objeto
-            elif isinstance(cached, list):
-                response_data = {
-                    "results": cached,
-                    "candidates_count": len(cached),
-                    "from_cache": True,
-                    "generated_at": datetime.now().isoformat()
-                }
-            else:
-                response_data = cached
-                
-            return jsonify(response_data)
-        
-        # 2. Si no hay caché, ejecutar análisis
-        log("⚠️ No hay caché válido, ejecutando análisis completo...")
-        log("="*60)
-        
-        analysis_result = run_analysis()
-        
-        if not analysis_result or not analysis_result.get('results'):
-            log("❌ No se encontraron resultados")
-            return jsonify({
-                "error": "No candidates found matching criteria",
-                "total_analyzed": analysis_result.get('total_analyzed', 0) if analysis_result else 0,
-                "candidates_count": 0
-            }), 404
-        
-        # 3. Guardar en caché
-        save_to_cache(analysis_result)
-        
-        # 4. Post-procesar si está disponible
-        if POST_PROCESSOR_AVAILABLE:
+        # Post-procesamiento automático
+        if POST_PROCESSOR_AVAILABLE and results.get('candidates_count', 0) > 0:
             try:
-                log("🔄 Post-procesando resultados...")
-                processor = ResultsPostProcessor(analysis_result)
+                log("🔄 Ejecutando post-procesamiento...")
+                processor = ResultsPostProcessor(results)
                 processed_data = processor.process_all()
-                analysis_result['processed'] = processed_data
+                
+                # Agregar datos procesados a la respuesta
+                results['post_processed'] = processed_data
                 log("✅ Post-procesamiento completado")
             except Exception as e:
-                log(f"⚠️ Error en post-procesamiento: {e}")
+                log(f"⚠️  Error en post-procesamiento: {e}")
+                results['post_processed'] = None
         
-        log("="*60)
-        log(f"✅ Análisis completado: {analysis_result['candidates_count']} candidatos encontrados")
-        log("="*60)
-        
-        return jsonify(analysis_result)
+        response = app.response_class(
+            response=json.dumps(results, default=str, allow_nan=False)
+                     .replace('NaN', 'null')
+                     .replace('Infinity', 'null')
+                     .replace('-Infinity', 'null'),
+            status=200,
+            mimetype='application/json'
+        )
+        return response
         
     except Exception as e:
-        log(f"❌ Error crítico en /analyze: {str(e)}")
+        log(f"❌ Error en análisis: {str(e)}")
         import traceback
         traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/cache-status')
+def cache_status():
+    """Verifica el estado del caché"""
+    if not GCS_AVAILABLE:
+        return jsonify({
+            "cache_enabled": False,
+            "message": "Cloud Storage not available"
+        })
+    
+    try:
+        blob = bucket.blob(CACHE_FILE_NAME)
+        
+        if not blob.exists():
+            return jsonify({
+                "cache_enabled": True,
+                "cache_exists": False,
+                "message": "No cached data available"
+            })
+        
+        cache_content = blob.download_as_string()
+        data = json.loads(cache_content)
+        
+        cache_time = datetime.fromisoformat(data.get("cached_at", ""))
+        expires_at = datetime.fromisoformat(data.get("expires_at", ""))
+        time_remaining = expires_at - datetime.now()
+        
+        is_expired = time_remaining.total_seconds() <= 0
+        
+        return jsonify({
+            "cache_enabled": True,
+            "cache_exists": True,
+            "is_expired": is_expired,
+            "cached_at": cache_time.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "time_remaining_hours": round(time_remaining.total_seconds() / 3600, 2),
+            "results_count": data["results"].get("total_analyzed", 0),
+            "candidates_count": data["results"].get("candidates_count", 0),
+            "file_size_kb": round(blob.size / 1024, 2)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/clear-cache')
+def clear_cache():
+    """Limpia el caché manualmente"""
+    if not GCS_AVAILABLE:
+        return jsonify({"status": "Cloud Storage not available"}), 503
+    
+    try:
+        blob = bucket.blob(CACHE_FILE_NAME)
+        if blob.exists():
+            blob.delete()
+            log("🗑️ Caché limpiado manualmente")
+            return jsonify({
+                "status": "success",
+                "message": "Cache cleared successfully"
+            })
+        else:
+            return jsonify({
+                "status": "success",
+                "message": "No cache to clear"
+            })
+    except Exception as e:
+        log(f"❌ Error limpiando caché: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/health')
