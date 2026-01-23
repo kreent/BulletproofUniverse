@@ -31,7 +31,12 @@ DEFAULT_CONFIG = {
     'MIN_PIOTROSKI': 6,         # 6 = ok, 7 = fuerte, 8+ excelente
     'MIN_PIO_COVERAGE': 7,      # mínimo señales evaluadas (de 9)
     
-    'DISCOUNT_RATE': 0.09,      # Tasa exigida del 9%
+    # WACC CONFIG (Dinámico)
+    'RISK_FREE_RATE': 0.042,      # Tasa bono 10 años aprox
+    'EQUITY_RISK_PREMIUM': 0.05,  # Prima de riesgo mercado
+    'MIN_WACC': 0.07,             # Piso para el WACC
+    'MAX_WACC': 0.15,             # Techo para el WACC (para no castigar demasiado high beta)
+    
     'MARGIN_OF_SAFETY_VIEW': -0.20  # Watchlist hasta -20%
 }
 
@@ -341,9 +346,9 @@ class PortfolioAnalyzer:
             tickers.update(BACKUP_LIST)
 
         final_list = list(set([t.replace(".", "-") for t in tickers]))
-        final_count = min(500, len(final_list))
+        final_count = min(600, len(final_list))
         log(f"   ✅ Total final: {final_count} tickers para analizar")
-        return final_list[:500]
+        return final_list[:600]
     
     @staticmethod
     def get_fuzzy_series(df, keywords):
@@ -480,7 +485,7 @@ class PortfolioAnalyzer:
             try:
                 fast = t.fast_info
                 market_cap = safe_float(getattr(fast, "market_cap", np.nan))
-                if np.isnan(market_cap) or market_cap < 5_000_000_000:
+                if np.isnan(market_cap) or market_cap < 2_000_000_000: # Mid-cap filter
                     return None
                 price = safe_float(getattr(fast, "last_price", np.nan))
                 shares = safe_float(getattr(fast, "shares", np.nan))
@@ -555,11 +560,19 @@ class PortfolioAnalyzer:
             if piotroski < self.config['MIN_PIOTROSKI']:
                 return None
 
-            # Sector
+            # Sector y Beta
             try:
-                sector = t.info.get("sector", "N/A")
+                info = t.info
+                sector = info.get("sector", "N/A")
+                beta = safe_float(info.get("beta", 1.0))
+                if np.isnan(beta): beta = 1.0
             except:
                 sector = "N/A"
+                beta = 1.0
+
+            # WACC Dinámico (CAPM approx)
+            wacc = self.config['RISK_FREE_RATE'] + (beta * self.config['EQUITY_RISK_PREMIUM'])
+            wacc = max(self.config['MIN_WACC'], min(wacc, self.config['MAX_WACC']))
 
             # --- FCF ---
             ocf_val = safe_float(ocf.iloc[0]) if not pd.isna(ocf.iloc[0]) else np.nan
@@ -579,7 +592,7 @@ class PortfolioAnalyzer:
             tv_weight = np.nan
 
             if (not np.isnan(fcf)) and fcf > 0:
-                r = self.config['DISCOUNT_RATE']
+                r = wacc
 
                 # Stage 1: 5 años de crecimiento
                 pv_stage1 = 0.0
@@ -622,6 +635,7 @@ class PortfolioAnalyzer:
                 'Piotroski_Coverage': int(pio_cov),
                 'Growth_Est': round(growth_est, 4),
                 'Terminal_g': round(terminal_g, 4),
+                'WACC': round(wacc, 4),
                 'Sector': sector,
                 # Nuevas columnas
                 'FCF': round(fcf, 2) if not np.isnan(fcf) else None,
@@ -630,6 +644,7 @@ class PortfolioAnalyzer:
                 'Cash': round(curr_cash, 2),
                 'MarketCap': round(market_cap, 2),
                 'Weight': round(tv_weight, 4) if not np.isnan(tv_weight) else None,
+                'DCF_TV_Weight': round(tv_weight, 4) if not np.isnan(tv_weight) else None,
                 # Columnas adicionales de riesgo
                 'Debt_to_MCap': round(debt_to_mcap, 4) if not np.isnan(debt_to_mcap) else None,
                 'FCF_Yield': round(fcf_yield, 4) if not np.isnan(fcf_yield) else None
@@ -762,4 +777,6 @@ if __name__ == "__main__":
     print(f"  MIN_ROIC: {DEFAULT_CONFIG['MIN_ROIC']*100}%")
     print(f"  MIN_PIOTROSKI: {DEFAULT_CONFIG['MIN_PIOTROSKI']} (real 0-9)")
     print(f"  MIN_PIO_COVERAGE: {DEFAULT_CONFIG['MIN_PIO_COVERAGE']}/9 señales")
-    print(f"  DISCOUNT_RATE: {DEFAULT_CONFIG['DISCOUNT_RATE']*100}%")
+    print(f"  MIN_WACC: {DEFAULT_CONFIG['MIN_WACC']*100}%")
+    print(f"  MAX_WACC: {DEFAULT_CONFIG['MAX_WACC']*100}%")
+    print(f"  RISK_FREE_RATE: {DEFAULT_CONFIG['RISK_FREE_RATE']*100}%")

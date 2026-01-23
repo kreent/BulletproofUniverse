@@ -69,9 +69,9 @@ except ImportError:
 CONFIG = {
     'MAX_WORKERS': 12,
     'MIN_ROIC': 0.08,           # 8% mínimo
-    'MIN_PIOTROSKI': 5,         # Calidad mínima
-    'DISCOUNT_RATE': 0.09,      # Tasa exigida del 9%
-    'MARGIN_OF_SAFETY_VIEW': -0.20  # Watchlist hasta -20%
+    'MIN_PIOTROSKI': 6,         # Calidad mínima (ajustado a 6)
+    'RISK_FREE_RATE': 0.042,
+    'MARGIN_OF_SAFETY_VIEW': -0.20
 }
 
 # -------- Flask App --------
@@ -89,16 +89,16 @@ def home():
         "cache_ttl_hours": CACHE_TTL_HOURS,
         "methodology": [
             "ROIC mínimo 8% (retorno sobre capital invertido)",
-            "Piotroski Score >= 5 (calidad financiera)",
-            "DCF 2-Stage con tasa de descuento 9%",
+            "Piotroski Score >= 6 (calidad financiera sólida)",
+            "DCF 2-Stage con WACC Dinámico (CAPM)",
             "Growth estimado basado en ROIC",
             "Margen de seguridad calculado vs precio actual"
         ],
         "filters": {
-            "min_market_cap": "5B USD",
+            "min_market_cap": "2B USD (Mid-cap support)",
             "min_roic": f"{CONFIG['MIN_ROIC']*100}%",
             "min_piotroski": CONFIG['MIN_PIOTROSKI'],
-            "discount_rate": f"{CONFIG['DISCOUNT_RATE']*100}%"
+            "risk_free_rate": f"{CONFIG['RISK_FREE_RATE']*100}%"
         },
         "endpoints": {
             "/analyze": "Run analysis (with 24h cache + auto post-processing)",
