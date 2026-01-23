@@ -322,23 +322,32 @@ class PortfolioAnalyzer:
         except:
             log("   ⚠️ Fallo GitHub Nasdaq.")
 
-        # Lista de respaldo manual
+        # Lista de respaldo manual (Ampliada)
         BACKUP_LIST = [
-            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'LLY', 'V',
-            'TSM', 'UNH', 'AVGO', 'JPM', 'NVO', 'WMT', 'XOM', 'MA', 'JNJ', 'PG',
-            'HD', 'MRK', 'COST', 'ABBV', 'ORCL', 'ASML', 'CVX', 'ADBE', 'AMD', 'KO',
-            'PEP', 'CRM', 'BAC', 'ACN', 'CSCO', 'NFLX', 'MCD', 'LIN', 'AZN', 'NKE',
-            'DIS', 'TMUS', 'ABT', 'DHR', 'WFC', 'INTC', 'INTU', 'QCOM', 'CMCSA', 'TXN',
-            'VZ', 'UPS', 'PM', 'NEE', 'RTX', 'MS', 'HON', 'AMGN', 'UNP', 'PFE',
-            'LOW', 'SPGI', 'CAT', 'IBM', 'AMAT', 'DE', 'GS', 'GE', 'LMT', 'PLD',
-            'BLK', 'SYK', 'T', 'ISRG', 'BKNG', 'ELV', 'MDT', 'TJX', 'ADI', 'NOW',
-            'MMC', 'CVS', 'ADP', 'VRTX', 'LRCX', 'UBER', 'REGN', 'PYPL', 'ZTS', 'CI',
-            'MET', 'AMP', 'KMB', 'FCX', 'CLX', 'IT', 'BIIB', 'CL', 'ZBRA', 'WSM',
-            'MKTX', 'LII', 'FDS', 'RL', 'HAS', 'GOOG', 'BRK-A', 'TMO', 'BMY', 'SBUX',
-            'BA', 'AXP', 'GILD', 'SCHW', 'MDLZ', 'CB', 'MO', 'AMT', 'PGR', 'SO',
-            'DUK', 'ETN', 'BSX', 'SLB', 'EQIX', 'PNC', 'NOC', 'USB', 'TGT', 'ITW',
-            'BDX', 'MU', 'HCA', 'WELL', 'KLAC', 'EOG', 'C', 'MMM', 'APH', 'FI',
-            'MCK', 'WM', 'PH', 'SNPS', 'CDNS', 'SHW', 'CMG', 'MAR', 'TDG', 'EMR'
+            'AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA','BRK-B','LLY','V','TSM',
+            'UNH','JPM','JNJ','PG','HD','MA','CVX','ABBV','MRK','KO','PEP','COST','AVGO',
+            'MCD','WMT','CSCO','BAC','ACN','ADBE','LIN','DIS','NKE','TXN','AMD','PM','NEST',
+            'ORCL','UPS','WFC','QCOM','INTC','HON','LOW','IBM','CAT','UNP','SBUX','GS',
+            'MS','DE','BLK','BA','MMM','GE','RTX','AMGN','AMT','NOW','SPGI','INTU','ISRG',
+            'PLD','SYK','ZTS','ADP','GILD','MDLZ','T','TJX','CVS','LMT','AXP','ADI','MMC',
+            'CB','VRTX','UBER','REGN','CI','C','MO','SO','DUK','D','USB','PNC','TGT','ITW',
+            'BDX','CL','ETN','SLB','EOG','COP','OXY','PXD','MPC','PSX','VLO','KMI','WMB',
+            'TRGP','OKE','CTRA','DVN','FANG','HAL','BKR','HES','APA','MRO','OVV','EQT',
+            'CHK','AR','SWN','RRC','MTDR','PDCE','CIVI','CNX','CRK','MGY','SM','CPE',
+            'LPI','TALO','WLL','OAS','SBOW','ESTE','BATL','REI','AMPY','GDP','LPG','DORL',
+            'NGL','USAC','CEQP','ET','EPD','PAA','MMP','NS','SHLX','HMLP','KNOP','TNK',
+            'STNG','INSW','ASC','EURN','FRO','DHT','NAT','TNP','SFL','GSL','DAC','ZIM',
+            'MATX','GNK','EGLE','SBLK','DSX','GRIN','PANL','SB','NM','NMM','CMRE','GASS',
+            'GLBS','SHIP','TOPS','PXS','ESEA','EDRY','BDI','DRY','DS','SYF','WRB','PGR',
+            'CINF','DVA','OMC','COR','MTCH','EG','MET','ALL','HIG','PFG','TRV','VZ',
+            'CMCSA','KMB','GL','AMP','AIZ','BIIB','CLX','MOH','HSY','IPG','GDDY','LULU',
+            'AZO','PYPL','SNA','FFIV','DECK','JKHY','EXPE','APTV','MAS','FDS','AJG',
+            'MKTX','LDOS','RMD','CDW','CPB','CAH','BBY','PHM','LVS','DELL','HSIC','CHD',
+            'WYNN','LKQ','YUM','CBOE','TROW','GD','NWSA','LII','PSA','CRM','VST','NWS',
+            'GEN','ZBRA','OTIS','WSM','PPG','KVUE','MNST','ALGN','ROST','CTAS','DPZ',
+            'WAB','PNR','RSG','AME','ECL','CHTR','NCLH','EBAY','SHW','SBAC','KR','COIN',
+            'NDAQ','PKG','STE','TMO','GOOG','IQV','EMR','SPG','FICO','CMI','DOV','PODD',
+            'IDXX','HWM','STX','TPL','RCL'
         ]
 
         if len(tickers) < 50:
