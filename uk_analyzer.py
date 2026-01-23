@@ -12,8 +12,44 @@ import sys
 import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from portfolio_analyzer import CacheManager, safe_float, get_fuzzy_series, get_latest_and_prev
-from portfolio_refiner import sector_bucket
+from portfolio_analyzer import CacheManager
+
+def safe_float(x):
+    """Convierte a float de forma segura"""
+    try:
+        if x is None: return np.nan
+        if isinstance(x, (np.floating, float)) and np.isnan(x): return np.nan
+        return float(x)
+    except: return np.nan
+
+def get_latest_and_prev(series: pd.Series):
+    """Obtiene valor actual y anterior de una serie"""
+    if series is None or series.empty: return (np.nan, np.nan)
+    a = safe_float(series.iloc[0])
+    b = safe_float(series.iloc[1]) if len(series) > 1 else np.nan
+    return a, b
+
+def get_fuzzy_series(df, keywords):
+    """Búsqueda fuzzy de campos en DataFrames financieros"""
+    if df is None or df.empty: return pd.Series(dtype=float)
+    df = df.copy()
+    df.index = df.index.astype(str).str.lower().str.strip()
+    for key in keywords:
+        k = key.lower()
+        if k in df.index: return df.loc[k]
+        matches = [i for i in df.index if k in i]
+        if matches: return df.loc[min(matches, key=len)]
+    return pd.Series(dtype=float)
+
+def sector_bucket(sector: str) -> str:
+    """Clasifica sector en bucket"""
+    defensive = {"Consumer Defensive", "Utilities", "Healthcare"}
+    cyclical = {"Consumer Cyclical", "Industrials", "Basic Materials", "Energy", "Real Estate"}
+    growth = {"Technology", "Communication Services"}
+    if sector in defensive: return "DEFENSIVE"
+    if sector in cyclical: return "CYCLICAL"
+    if sector in growth: return "GROWTH"
+    return "OTHER"
 
 # ==========================================
 # ⚙️ CONFIG (UK calibrated)
@@ -129,7 +165,6 @@ class UKAnalyzer:
         return list(dict.fromkeys(raw))[:700]
 
     def compute_piotroski_fscore(self, inc, bal, cf):
-        from portfolio_analyzer import get_latest_and_prev
         score = 0; covered = 0
         ni = get_fuzzy_series(inc, ["Net Income"]); ocf = get_fuzzy_series(cf, ["Operating Cash Flow"])
         assets = get_fuzzy_series(bal, ["Total Assets"]); ltd = get_fuzzy_series(bal, ["Total Debt"])
