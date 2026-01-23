@@ -23,6 +23,7 @@ COPY portfolio_analyzer.py .
 COPY portfolio_refiner.py .
 COPY post_processor.py .
 COPY portfolio_tracker.py .
+COPY uk_analyzer.py .
 
 # Exponer el puerto que usa Flask (8080 por defecto en Cloud Run)
 EXPOSE 8080
