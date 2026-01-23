@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import io
 from portfolio_analyzer import CacheManager
 
 def safe_float(x):
@@ -148,20 +149,34 @@ class UKAnalyzer:
     def get_uk_universe_ftse(self):
         self.log("🇬🇧 Generando Universo UK (Wikipedia)...")
         tickers = []
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+        
         def extract(url):
             try: 
-                tbls = pd.read_html(url)
+                r = requests.get(url, headers=headers, timeout=15)
+                if r.status_code != 200:
+                    self.log(f"   ⚠️ Wikipedia returned {r.status_code} for {url}")
+                    return []
+                # Use io.StringIO to avoid future warnings and handle the HTML string
+                tbls = pd.read_html(io.StringIO(r.text))
                 for df in tbls:
                     for col in ["Ticker", "EPIC"]:
                         if col in df.columns: return df[col].astype(str).tolist()
-            except: return []
+            except Exception as e:
+                self.log(f"   ⚠️ Error extracting from {url}: {e}")
+                return []
             return []
         
         tickers.extend(extract("https://en.wikipedia.org/wiki/FTSE_100_Index"))
         tickers.extend(extract("https://en.wikipedia.org/wiki/FTSE_250_Index"))
         
         raw = list(dict.fromkeys([t.strip().replace(".", "-") + ".L" for t in tickers if t and t != "nan"]))
-        if len(raw) < 50: raw.extend(["AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L"])
+        self.log(f"   ✅ Extraídos {len(raw)} tickers de Wikipedia.")
+        
+        if len(raw) < 50: 
+            self.log("   ⚠️ Fallo extracción masiva. Usando fallback extendido...")
+            raw.extend(["AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L", "ULVR.L", "BATS.L", "REL.L"])
+            
         return list(dict.fromkeys(raw))[:700]
 
     def compute_piotroski_fscore(self, inc, bal, cf):
@@ -206,31 +221,50 @@ class UKAnalyzer:
             as_of = pd.Timestamp(as_of_date)
             t = yf.Ticker(ticker)
             raw_px, px_dt = self.last_close_on_or_before(t, as_of, self.config["LOOKBACK_DAYS_PRICE"])
-            if np.isnan(raw_px): return None
+            if np.isnan(raw_px):
+                self.log(f"   ❌ {ticker}: No price data")
+                return None
 
             info = t.info
             ccy = info.get("currency", "GBP")
             price, ccy_norm, _ = self.normalize_uk_price(raw_px, ccy)
             
+            # Use property access to avoid fetching if empty
+            if t.income_stmt.empty:
+                self.log(f"   ❌ {ticker}: No financials")
+                return None
+                
             inc = self.filter_fs_asof(t.income_stmt, as_of)
             bal = self.filter_fs_asof(t.balance_sheet, as_of)
             cf = self.filter_fs_asof(t.cashflow, as_of)
-            if inc.empty or bal.empty or cf.empty: return None
+            
+            if inc.empty or bal.empty or cf.empty:
+                self.log(f"   ❌ {ticker}: Filtered financials empty (As-Of: {as_of.date()})")
+                return None
 
             sector = info.get("sector", "N/A")
-            if self.config["EXCLUDE_FINANCIALS"] and sector == "Financial Services": return None
+            if self.config["EXCLUDE_FINANCIALS"] and sector == "Financial Services":
+                return None
             
             shares = self.get_shares_asof(inc)
-            if np.isnan(shares) or shares <= 0: return None
+            if np.isnan(shares) or shares <= 0:
+                return None
             
             mcap_local = price * shares
             fx, _ = self.get_fx_to_usd_asof(ccy_norm, as_of)
             mcap_usd = mcap_local * fx
-            if mcap_usd < self.config["MIN_MCAP_USD"]: return None
+            
+            # Filtro MCAP
+            if mcap_usd < self.config["MIN_MCAP_USD"]:
+                return None
 
             # Piotroski
             pio, pio_cov = self.compute_piotroski_fscore(inc, bal, cf)
-            if pio_cov < self.config["MIN_PIO_COVERAGE"] or pio < self.config["MIN_PIOTROSKI"]: return None
+            if pio_cov < self.config["MIN_PIO_COVERAGE"]:
+                return None
+            if pio < self.config["MIN_PIOTROSKI"]:
+                self.log(f"   ⚖️ {ticker}: Piotroski {pio}/9 (Min {self.config['MIN_PIOTROSKI']})")
+                return None
 
             # ROIC
             ebit = get_fuzzy_series(inc, ["EBIT"]); eq = get_fuzzy_series(bal, ["Stockholders Equity"])
@@ -240,11 +274,15 @@ class UKAnalyzer:
             c_cash = safe_float(cash.iloc[0]) if not cash.empty else 0
             inv_cap = c_eq + c_debt - c_cash
             roic = (c_ebit * 0.79) / inv_cap if inv_cap > 0 else 0
-            if roic < self.config["MIN_ROIC"]: return None
+            
+            if roic < self.config["MIN_ROIC"]:
+                self.log(f"   ⚖️ {ticker}: ROIC {roic:.1%} (Min {self.config['MIN_ROIC']:.1%})")
+                return None
 
             # DCF
-            ocf = get_fuzzy_series(cf, ["Operating Cash Flow"]); cpx = get_fuzzy_series(cf, ["Capital Expenditures"])
-            fcf = safe_float(ocf.iloc[0]) - abs(safe_float(cpx.iloc[0]))
+            ocf_s = get_fuzzy_series(cf, ["Operating Cash Flow"])
+            cpx_s = get_fuzzy_series(cf, ["Capital Expenditures"])
+            fcf = safe_float(ocf_s.iloc[0]) - abs(safe_float(cpx_s.iloc[0]))
             
             bucket = sector_bucket(sector)
             r = self.discount_rate_for_bucket(bucket)
@@ -264,7 +302,8 @@ class UKAnalyzer:
                     mos = (intrinsic - price) / intrinsic
                     tvw = pv_tv / ev
 
-            if mos < self.config["MARGIN_OF_SAFETY_VIEW"] and pio < 7: return None
+            if mos < self.config["MARGIN_OF_SAFETY_VIEW"] and pio < 7:
+                return None
 
             return {
                 "Ticker": ticker, "AsOf": str(as_of.date()), "Sector": sector,
@@ -274,7 +313,9 @@ class UKAnalyzer:
                 "MarketCap_USD": round(mcap_usd, 0), "FCF_Yield": round(fcf / mcap_local, 4) if mcap_local > 0 else 0,
                 "DCF_TV_Weight": round(tvw, 4)
             }
-        except: return None
+        except Exception as e:
+            # self.log(f"   ⚠️ Error en {ticker}: {e}")
+            return None
 
     def run_analysis(self, as_of_date=None, use_cache=True):
         as_of = as_of_date or self.config["AS_OF_DATE"]
