@@ -12,36 +12,25 @@ import json
 # CONFIGURACIÓN INSTITUCIONAL
 # ==========================================
 ANALYST_CONFIG = {
-    # Piotroski gates
-    "MIN_PIO_BUY": 6,
+    "MIN_PIO_BUY": 6, 
     "MIN_PIO_STRONG": 7,
-    
-    # ROIC gates
-    "MIN_ROIC_BUY": 0.10,
+    "MIN_ROIC_BUY": 0.10, 
     "MIN_ROIC_STRONG": 0.12,
-    
-    # DCF TV Weight (fragilidad)
-    "MAX_TVW_BUY": 0.80,
+    "MAX_TVW_BUY": 0.80, 
     "MAX_TVW_STRONG": 0.77,
-    
-    # Debt to Market Cap
-    "MAX_DTM_BUY": 1.0,
+    "MAX_DTM_BUY": 1.0, 
     "MAX_DTM_STRONG": 0.9,
     
-    # MOS por bucket sectorial
-    "MOS_BUY": {"DEFENSIVE": 0.36, "CYCLICAL": 0.34, "GROWTH": 0.30, "OTHER": 0.32},
-    "MOS_STRONG": {"DEFENSIVE": 0.44, "CYCLICAL": 0.42, "GROWTH": 0.38, "OTHER": 0.40},
+    # Ajustado para ser realista con blue chips
+    "MOS_BUY":    {"DEFENSIVE": 0.15, "CYCLICAL": 0.20, "GROWTH": 0.20, "OTHER": 0.20},
+    "MOS_STRONG": {"DEFENSIVE": 0.25, "CYCLICAL": 0.30, "GROWTH": 0.30, "OTHER": 0.30},
     
-    # FCF Yield por bucket
-    "FCFY_BUY": {"DEFENSIVE": 0.085, "CYCLICAL": 0.055, "GROWTH": 0.045, "OTHER": 0.055},
-    "FCFY_STRONG": {"DEFENSIVE": 0.100, "CYCLICAL": 0.065, "GROWTH": 0.055, "OTHER": 0.065},
+    # FCF Yield ajustado por bucket
+    "FCFY_BUY":    {"DEFENSIVE": 0.04, "CYCLICAL": 0.05, "GROWTH": 0.03, "OTHER": 0.04},
+    "FCFY_STRONG": {"DEFENSIVE": 0.06, "CYCLICAL": 0.07, "GROWTH": 0.05, "OTHER": 0.06},
     
-    # Upside mínimo
-    "UP_BUY": 0.55,
-    "UP_STRONG": 0.85,
-    
-    # Anti-trampa defensivos
-    "DEF_MAX_GROWTH_EST": 0.10,
+    "UP_BUY": 0.20,
+    "UP_STRONG": 0.40,
     "REQUIRE_POSITIVE_FCF": True,
 }
 
@@ -76,52 +65,37 @@ def issuer_key(ticker: str) -> str:
 
 
 def mos_penalty(dtm, tvw):
-    """Penalización de MOS por riesgo de deuda y fragilidad DCF"""
+    """Penalización de MOS por riesgo de deuda y fragilidad DCF (v3.8)"""
     pen = 0.0
-    if not pd.isna(dtm):
-        if dtm >= 1.2:
-            pen += 0.06
-        elif dtm >= 1.0:
-            pen += 0.03
-    if not pd.isna(tvw):
-        if tvw >= 0.85:
-            pen += 0.07
-        elif tvw >= 0.80:
-            pen += 0.04
+    if not pd.isna(dtm) and dtm >= 1.0:
+        pen += 0.05
+    if not pd.isna(tvw) and tvw >= 0.80:
+        pen += 0.05
     return pen
 
 
-def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataFrame:
+def analyst_ai_v38(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataFrame:
     """
-    Analyst AI V3.7: Selecciona SOLO oportunidades de alta convicción ("JOYAS")
-    
-    - Gates estrictos institucionales
-    - Anti-trampas para defensivos
-    - Penalización por fragilidad DCF
-    
-    Args:
-        df_input: DataFrame con resultados del Oracle Screener
-        return_all: Si True, devuelve también WATCH/AVOID
-        
-    Returns:
-        DataFrame con recomendaciones
+    Analyst AI V3.8: Selecciona SOLO oportunidades de alta convicción ("JOYAS")
+    Integrando WACC dinámico y gates Blue Chip realistas.
     """
     required_cols = [
-        "Ticker", "Price", "Sector", "ROIC", "Piotroski", "Growth_Est",
-        "Intrinsic", "MOS", "FCF", "Debt", "Cash", "MarketCap"
+        "Ticker", "Price", "Sector", "ROIC", "Piotroski", "Growth_Est", "Terminal_g",
+        "Intrinsic", "MOS", "FCF", "Debt", "Cash", "MarketCap", "Debt_to_MCap", 
+        "FCF_Yield", "DCF_TV_Weight", "WACC"
     ]
     
-    # Verificar columnas mínimas
-    missing = [c for c in required_cols if c not in df_input.columns]
-    if missing:
-        print(f"⚠️ Columnas faltantes (se usarán valores por defecto): {missing}")
+    # Asegurar columnas (especialmente WACC)
+    for c in required_cols:
+        if c not in df_input.columns:
+            df_input[c] = np.nan
     
     df = df_input.copy()
     
     # Normalización numérica
     num_cols = [
         "Price", "ROIC", "Piotroski", "Growth_Est", "Terminal_g", "Intrinsic", "MOS",
-        "FCF", "OCF", "Debt", "Cash", "MarketCap", "Debt_to_MCap", "FCF_Yield", "Weight"
+        "FCF", "Depth", "Cash", "MarketCap", "Debt_to_MCap", "FCF_Yield", "DCF_TV_Weight", "WACC"
     ]
     for c in num_cols:
         if c in df.columns:
@@ -129,21 +103,6 @@ def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataF
     
     df["Sector"] = df["Sector"].fillna("N/A").astype(str)
     df["Ticker"] = df["Ticker"].astype(str)
-    
-    # Calcular columnas derivadas si no existen
-    if "Debt_to_MCap" not in df.columns and "Debt" in df.columns and "MarketCap" in df.columns:
-        df["Debt_to_MCap"] = df["Debt"] / df["MarketCap"]
-        df["Debt_to_MCap"] = df["Debt_to_MCap"].replace([np.inf, -np.inf], np.nan)
-    
-    if "FCF_Yield" not in df.columns and "FCF" in df.columns and "MarketCap" in df.columns:
-        df["FCF_Yield"] = df["FCF"] / df["MarketCap"]
-        df["FCF_Yield"] = df["FCF_Yield"].replace([np.inf, -np.inf], np.nan)
-    
-    # Weight es DCF_TV_Weight en el nuevo formato
-    if "Weight" in df.columns and "DCF_TV_Weight" not in df.columns:
-        df["DCF_TV_Weight"] = df["Weight"]
-    elif "DCF_TV_Weight" not in df.columns:
-        df["DCF_TV_Weight"] = np.nan
     
     cfg = ANALYST_CONFIG
     out = []
@@ -153,54 +112,30 @@ def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataF
         sector = r["Sector"]
         bucket = sector_bucket(sector)
         
-        price = r.get("Price", np.nan)
-        fair = r.get("Intrinsic", np.nan)
-        
-        roic = r.get("ROIC", np.nan)
-        pio = r.get("Piotroski", np.nan)
-        fcf = r.get("FCF", np.nan)
-        fcfy = r.get("FCF_Yield", np.nan)
-        dtm = r.get("Debt_to_MCap", np.nan)
-        tvw = r.get("DCF_TV_Weight", np.nan)
-        g_est = r.get("Growth_Est", np.nan)
-        t_g = r.get("Terminal_g", np.nan)
+        price = r["Price"]
+        fair = r["Intrinsic"]
+        roic = r["ROIC"]
+        pio = r["Piotroski"]
+        fcf = r["FCF"]
+        fcfy = r["FCF_Yield"]
+        dtm = r["Debt_to_MCap"]
+        tvw = r["DCF_TV_Weight"]
+        g_est = r["Growth_Est"]
+        t_g = r["Terminal_g"]
+        wacc = r.get("WACC", 0.09)
         
         # Financieras fuera de DCF
         if sector == "Financial Services":
-            if return_all:
-                out.append({
-                    "Ticker": ticker,
-                    "Issuer": issuer_key(ticker),
-                    "Sector": sector,
-                    "Bucket": bucket,
-                    "Price": price,
-                    "Target_Fair": np.nan,
-                    "Upside": np.nan,
-                    "Real_MOS": np.nan,
-                    "Action": "VALUAR P/B",
-                    "Cat": "🏦 Banco/Seguro",
-                    "Flags": "DCF_NA",
-                    "Why": "Bancos/seguros: usar P/B + ROE + calidad de balance.",
-                    "DCF_TV_Weight": tvw,
-                    "Debt_to_MCap": dtm,
-                    "FCF_Yield": fcfy,
-                    "Piotroski": pio,
-                    "ROIC": roic
-                })
             continue
         
-        # Sanity checks
         if pd.isna(price) or pd.isna(fair) or price <= 0 or fair <= 0:
             continue
         
         upside = (fair - price) / price
         real_mos = (fair - price) / fair
         
-        flags, why = [], []
-        
-        # FCF positivo obligatorio
-        fcf_ok = (not pd.isna(fcf)) and (fcf > 0)
-        if cfg["REQUIRE_POSITIVE_FCF"] and (not fcf_ok):
+        flags = []
+        if cfg["REQUIRE_POSITIVE_FCF"] and (pd.isna(fcf) or fcf <= 0):
             flags.append("FCF_NEG")
         
         mos_req_buy = cfg["MOS_BUY"][bucket] + mos_penalty(dtm, tvw)
@@ -212,31 +147,16 @@ def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataF
         # Anti-trampa defensivos
         defensive_trap = False
         if bucket == "DEFENSIVE":
-            if (not pd.isna(g_est)) and (g_est > cfg["DEF_MAX_GROWTH_EST"]):
+            if (not pd.isna(g_est)) and (g_est > 0.12):
                 defensive_trap = True
-                flags.append("DEF_GROWTH_IMPLAUSIBLE")
+                flags.append("GROWTH_IMPLAUSIBLE")
             if (not pd.isna(pio)) and (pio <= 5):
                 defensive_trap = True
-                flags.append("DEF_LOW_PIO")
-            if (pd.isna(fcfy)) or (fcfy < fcfy_req_buy):
-                flags.append("DEF_FCFY_LOW")
+                flags.append("LOW_PIO")
         
         # Fragilidad DCF
         if (not pd.isna(tvw)) and (tvw > 0.85):
             flags.append("TV_HEAVY")
-        
-        # Gates STRONG BUY
-        base_ok_strong = (
-            (not pd.isna(pio)) and (pio >= cfg["MIN_PIO_STRONG"]) and
-            (not pd.isna(roic)) and (roic >= cfg["MIN_ROIC_STRONG"]) and
-            (not pd.isna(fcfy)) and (fcfy >= fcfy_req_strong) and
-            (not pd.isna(dtm)) and (dtm <= cfg["MAX_DTM_STRONG"]) and
-            (not pd.isna(tvw)) and (tvw <= cfg["MAX_TVW_STRONG"]) and
-            fcf_ok and
-            (real_mos >= mos_req_strong) and
-            (upside >= cfg["UP_STRONG"]) and
-            (not defensive_trap)
-        )
         
         # Gates BUY
         base_ok_buy = (
@@ -245,23 +165,51 @@ def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataF
             (not pd.isna(fcfy)) and (fcfy >= fcfy_req_buy) and
             (not pd.isna(dtm)) and (dtm <= cfg["MAX_DTM_BUY"]) and
             (not pd.isna(tvw)) and (tvw <= cfg["MAX_TVW_BUY"]) and
-            fcf_ok and
-            (real_mos >= mos_req_buy) and
-            (upside >= cfg["UP_BUY"]) and
-            (not defensive_trap)
+            (not defensive_trap) and
+            (real_mos >= mos_req_buy)
+        )
+        
+        # Gates STRONG BUY
+        base_ok_strong = (
+            (not pd.isna(pio)) and (pio >= cfg["MIN_PIO_STRONG"]) and
+            (not pd.isna(roic)) and (roic >= cfg["MIN_ROIC_STRONG"]) and
+            (not pd.isna(fcfy)) and (fcfy >= fcfy_req_strong) and
+            (not pd.isna(dtm)) and (dtm <= cfg["MAX_DTM_STRONG"]) and
+            (not pd.isna(tvw)) and (tvw <= cfg["MAX_TVW_STRONG"]) and
+            (not defensive_trap) and
+            (real_mos >= mos_req_strong)
         )
         
         action, cat = "AVOID", "❌ No pasa filtros"
+        
+        # Narrative Building
+        narrative = []
+        if upside >= 0.80: narrative.append("descuento masivo")
+        elif upside >= 0.50: narrative.append("claramente subvaluada")
+        elif upside >= 0.25: narrative.append("precio atractivo")
+        else: narrative.append("precio razonable")
+        
+        if roic >= 0.18: narrative.append("alta eficiencia de capital")
+        elif roic >= 0.12: narrative.append("rentabilidad sólida")
+        if pio >= 8: narrative.append("salud financiera robusta")
+        
+        if dtm <= 0.2: narrative.append("balance muy limpio")
+        if wacc < 0.08: narrative.append("perfil de bajo riesgo (WACC bajo)")
+        
+        why_text = " + ".join(narrative).capitalize() + "."
+        
         if base_ok_strong:
-            action, cat = "STRONG BUY", "💎 JOYA REAL"
-            why.append("Pasa gates estrictos (calidad + robustez + riesgo controlado).")
+            action, cat = "STRONG BUY", "💎 JOYA"
+            final_why = f"Convencimiento Alto: {why_text}"
         elif base_ok_buy:
             action, cat = "BUY", "✅ Oportunidad"
-            why.append("Pasa gates institucionales (MOS/FCFY + riesgo controlado).")
+            final_why = f"Tesis Sólida: {why_text}"
         else:
-            if (real_mos >= 0.18) and (upside >= 0.30):
-                action, cat = "WATCH", "⚖️ Casi, pero no"
-                why.append("Hay descuento, pero no alcanza robustez/calidad/riesgo para compra.")
+            if (real_mos >= 0.15) and (upside >= 0.20):
+                action, cat = "WATCH", "⚖️ Casi"
+                final_why = "Barata, pero falta confirmar calidad o reducir deuda."
+            else:
+                final_why = "No cumple criterios de seguridad o precio."
         
         if (not return_all) and (action not in {"STRONG BUY", "BUY"}):
             continue
@@ -282,25 +230,22 @@ def analyst_ai_v37(df_input: pd.DataFrame, return_all: bool = False) -> pd.DataF
             "DCF_TV_Weight": tvw,
             "Growth_Est": g_est,
             "Terminal_g": t_g,
+            "WACC": wacc,
             "Action": action,
             "Cat": cat,
             "Flags": ",".join(sorted(set(flags))),
-            "Why": " ".join(why) if why else ""
+            "Why": final_why
         })
     
     res = pd.DataFrame(out)
     if res.empty:
         return res
     
-    # Dedup por issuer: mejor acción, luego upside
-    action_rank = {"STRONG BUY": 0, "BUY": 1, "WATCH": 2, "AVOID": 3, "VALUAR P/B": 4}
+    # Dedup por issuer
+    action_rank = {"STRONG BUY": 0, "BUY": 1, "WATCH": 2, "AVOID": 3}
     res["_ar"] = res["Action"].map(action_rank).fillna(99)
     res = res.sort_values(by=["_ar", "Upside"], ascending=[True, False])
     res = res.drop_duplicates(subset=["Issuer"], keep="first").drop(columns=["_ar"])
-    
-    # Orden final
-    res["_ar2"] = res["Action"].map(action_rank).fillna(99)
-    res = res.sort_values(by=["_ar2", "Upside"], ascending=[True, False]).drop(columns=["_ar2"])
     
     return res
 
@@ -325,33 +270,28 @@ def add_exit_plan(df_rec: pd.DataFrame) -> pd.DataFrame:
     fair = pd.to_numeric(dfp["Target_Fair"], errors="coerce")
     tvw = pd.to_numeric(dfp.get("DCF_TV_Weight", pd.Series([np.nan] * len(dfp))), errors="coerce")
     
-    # Penalización por TV weight (fragilidad del fair)
-    tv_penalty = np.where(tvw >= 0.78, 0.90, np.where(tvw >= 0.74, 0.95, 1.00))
+    # Penalización por TV weight (v3.8)
+    tv_penalty = np.where(tvw >= 0.75, 0.90, 1.00)
     dfp["TV_Penalty"] = tv_penalty
     
     gap = (fair - price).clip(lower=0)
     
-    # Convergencia parcial por horizonte y tipo de acción
-    # 6m: más conservador
-    conv6 = np.where(dfp["Action"].eq("STRONG BUY"), 0.60,
-            np.where(dfp["Action"].eq("BUY"), 0.45, 0.40))
-    # 12m: más "tesis"
-    conv12 = np.where(dfp["Action"].eq("STRONG BUY"), 0.80,
-             np.where(dfp["Action"].eq("BUY"), 0.65, 0.55))
+    # Convergencia parcial (v3.8)
+    conv6 = np.where(dfp["Action"] == "STRONG BUY", 0.50, 0.35)
+    conv12 = np.where(dfp["Action"] == "STRONG BUY", 0.80, 0.60)
     
     dfp["Conv_6M"] = conv6
     dfp["Conv_12M"] = conv12
     
     # Targets base
-    tgt6 = price + gap * dfp["Conv_6M"] * dfp["TV_Penalty"]
-    tgt12 = price + gap * dfp["Conv_12M"] * dfp["TV_Penalty"]
+    tgt6 = price + gap * conv6 * tv_penalty
+    tgt12 = price + gap * conv12 * tv_penalty
     
-    # Caps de upside para no pedir imposibles
-    cap6 = np.where(dfp["Action"].eq("STRONG BUY"), 1.20, 0.90)
-    cap12 = np.where(dfp["Action"].eq("STRONG BUY"), 1.80, 1.40)
+    # Caps operativos
+    cap6 = np.where(dfp["Action"] == "STRONG BUY", 1.20, 0.90)
     
     dfp["Target_6M"] = np.minimum(tgt6, price * (1 + cap6))
-    dfp["Target_12M"] = np.minimum(tgt12, price * (1 + cap12))
+    dfp["Target_12M"] = tgt12 # Sin cap a 12m
     
     dfp["Upside_6M"] = (dfp["Target_6M"] - price) / price
     dfp["Upside_12M"] = (dfp["Target_12M"] - price) / price
@@ -425,9 +365,9 @@ class PortfolioRefiner:
         if not self.load_data():
             return None
         
-        # Paso 1: Analyst AI V3.7 (selección de JOYAS)
-        print("\n🧠 Ejecutando Analyst AI V3.7: Joyas-only...")
-        self.refined_df = analyst_ai_v37(self.df, return_all=self.return_all)
+        # Paso 1: Analyst AI V3.8 (selección de JOYAS)
+        print("\n🧠 Ejecutando Analyst AI V3.8: Joyas-only (WACC Aware)...")
+        self.refined_df = analyst_ai_v38(self.df, return_all=self.return_all)
         
         if self.refined_df is None or self.refined_df.empty:
             print("⚠️ No se encontraron oportunidades que pasen los filtros estrictos")
@@ -483,6 +423,7 @@ class PortfolioRefiner:
             stats['avg_upside_6m'] = float(buys['Upside_6M'].mean()) if 'Upside_6M' in buys.columns else None
             stats['avg_upside_12m'] = float(buys['Upside_12M'].mean()) if 'Upside_12M' in buys.columns else None
             stats['avg_mos'] = float(buys['Real_MOS'].mean()) if 'Real_MOS' in buys.columns else None
+            stats['avg_wacc'] = float(buys['WACC'].mean()) if 'WACC' in buys.columns else None
         
         return stats
     
