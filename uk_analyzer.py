@@ -174,8 +174,15 @@ class UKAnalyzer:
         self.log(f"   ✅ Extraídos {len(raw)} tickers de Wikipedia.")
         
         if len(raw) < 50: 
-            self.log("   ⚠️ Fallo extracción masiva. Usando fallback extendido...")
-            raw.extend(["AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L", "ULVR.L", "BATS.L", "REL.L"])
+            self.log("   ⚠️ Fallo extracción masiva de Wikipedia. Usando fallback robusto...")
+            # Lista ampliada de Blue Chips del Reino Unido (FTSE 100)
+            robust_fallback = [
+                "AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L", "ULVR.L", 
+                "BATS.L", "REL.L", "GLEN.L", "GSK.L", "LLOY.L", "BARC.L", "VOD.L", "AHT.L",
+                "CPG.L", "SSE.L", "NWG.L", "RR.L", "BA.L", "TSCO.L", "NG.L", "PRU.L",
+                "LGEN.L", "AV.L", "ADM.L", "SN.L", "INF.L", "WPP.L", "EXPN.L", "SGE.L"
+            ]
+            raw.extend(robust_fallback)
             
         return list(dict.fromkeys(raw))[:700]
 
