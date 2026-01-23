@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from portfolio_analyzer import CacheManager, safe_float, get_fuzzy_series, get_latest_and_prev
+from portfolio_refiner import sector_bucket
 
 # ==========================================
 # ⚙️ CONFIG (UK calibrated)

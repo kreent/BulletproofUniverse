@@ -24,7 +24,6 @@ def log(msg):
 # Portfolio Analyzer (Core)
 try:
     from portfolio_analyzer import PortfolioAnalyzer, CacheManager
-    from uk_analyzer import UKAnalyzer
     PORTFOLIO_ANALYZER_AVAILABLE = True
     # Inicializar instancias globales
     cache_manager = CacheManager()
@@ -41,6 +40,15 @@ except ImportError as e:
     cache_manager = None
     analyzer = None
     print(f"⚠️  Portfolio Analyzer no disponible: {e}")
+
+# UK Analyzer
+try:
+    from uk_analyzer import UKAnalyzer
+    UK_ANALYZER_AVAILABLE = True
+    print("✓ UK Analyzer cargado")
+except Exception as e:
+    UK_ANALYZER_AVAILABLE = False
+    print(f"⚠️  UK Analyzer no disponible: {e}")
 
 # Post-processor
 try:
@@ -156,6 +164,11 @@ def analyze():
 @app.route('/analyzeuk')
 def analyze_uk():
     """Endpoint de análisis para el mercado UK (FTSE 100 + FTSE 250)"""
+    if not UK_ANALYZER_AVAILABLE:
+        return jsonify({
+            "error": "UK Analyzer not available"
+        }), 503
+        
     try:
         as_of = request.args.get('as_of', None)
         use_cache = request.args.get('cache', 'true').lower() == 'true'
