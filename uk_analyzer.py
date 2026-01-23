@@ -93,19 +93,35 @@ class UKAnalyzer:
 
     # --- UK/As-Of Helpers ---
     def last_close_on_or_before(self, t: yf.Ticker, as_of: pd.Timestamp, lookback_days: int = 10):
+        """Returns (close, date_used). Uses last business day <= as_of."""
         try:
             start = (as_of - pd.Timedelta(days=lookback_days)).date()
             end = (as_of + pd.Timedelta(days=1)).date()
             hist = t.history(start=str(start), end=str(end), auto_adjust=False)
-            if hist is None or hist.empty or "Close" not in hist.columns: return (np.nan, None)
+            if hist is None or hist.empty or "Close" not in hist.columns:
+                return (np.nan, None)
             hist = hist.dropna(subset=["Close"])
-            if hist.empty: return (np.nan, None)
-            idx = hist.index.tz_localize(None) if hist.index.tz is not None else hist.index
-            hist = hist.copy(); hist.index = idx
+            if hist.empty:
+                return (np.nan, None)
+            
+            # Normalize timezone
+            idx = hist.index
+            try:
+                idx = idx.tz_localize(None)
+            except Exception:
+                pass
+            
+            hist = hist.copy()
+            hist.index = idx
             hist = hist[hist.index <= as_of]
-            if hist.empty: return (np.nan, None)
-            return (safe_float(hist["Close"].iloc[-1]), hist.index[-1])
-        except: return (np.nan, None)
+            if hist.empty:
+                return (np.nan, None)
+            
+            close = safe_float(hist["Close"].iloc[-1])
+            dt_used = hist.index[-1]
+            return (close, dt_used)
+        except Exception:
+            return (np.nan, None)
 
     def filter_fs_asof(self, df: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
         if df is None or df.empty: return df
@@ -118,9 +134,29 @@ class UKAnalyzer:
         cols_sorted = sorted(cols, key=lambda x: pd.Timestamp(x), reverse=True)
         return df[cols_sorted]
 
-    def get_shares_asof(self, inc: pd.DataFrame):
-        sh = get_fuzzy_series(inc, ["Basic Average Shares", "Diluted Average Shares", "Average Shares"])
-        return safe_float(sh.iloc[0]) if not sh.empty else np.nan
+    def get_shares_asof(self, inc: pd.DataFrame, bal: pd.DataFrame = None):
+        """Try multiple sources for shares: income stmt -> balance sheet"""
+        # Try income statement first (average shares)
+        sh = get_fuzzy_series(inc, [
+            "Basic Average Shares",
+            "Diluted Average Shares",
+            "Average Shares",
+            "Weighted Average Shares"
+        ])
+        if not sh.empty:
+            val = safe_float(sh.iloc[0])
+            if not np.isnan(val) and val > 0:
+                return (val, "income_stmt")
+        
+        # Fallback to balance sheet
+        if bal is not None:
+            sh_bal = get_fuzzy_series(bal, ["Ordinary Shares Number", "Share Issued"])
+            if not sh_bal.empty:
+                val = safe_float(sh_bal.iloc[0])
+                if not np.isnan(val) and val > 0:
+                    return (val, "balance_sheet")
+        
+        return (np.nan, "not_found")
 
     def get_fx_to_usd_asof(self, ccy: str, as_of: pd.Timestamp):
         if ccy == "USD": return (1.0, as_of)
@@ -178,9 +214,11 @@ class UKAnalyzer:
             # Lista ampliada de Blue Chips del Reino Unido (FTSE 100)
             robust_fallback = [
                 "AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L", "ULVR.L", 
-                "BATS.L", "REL.L", "GLEN.L", "GSK.L", "LLOY.L", "BARC.L", "VOD.L", "AHT.L",
+                "BATS.L", "REL.L", "GLEN.L", "LLOY.L", "BARC.L", "VOD.L", "AHT.L",
                 "CPG.L", "SSE.L", "NWG.L", "RR.L", "BA.L", "TSCO.L", "NG.L", "PRU.L",
-                "LGEN.L", "AV.L", "ADM.L", "SN.L", "INF.L", "WPP.L", "EXPN.L", "SGE.L"
+                "LGEN.L", "AV.L", "ADM.L", "SN.L", "INF.L", "WPP.L", "EXPN.L", "SGE.L",
+                "ENT.L", "FLTR.L", "JD.L", "MNG.L", "OCDO.L", "PHNX.L", "PSN.L", "RMV.L",
+                "SMDS.L", "SMIN.L", "SPX.L", "STJ.L", "TW.L", "VTY.L", "WTB.L"
             ]
             raw.extend(robust_fallback)
             
@@ -341,7 +379,7 @@ class UKAnalyzer:
         results = sorted(results, key=lambda x: x["MOS"], reverse=True)
         final = {
             "total_analyzed": len(tickers), "candidates_count": len(results),
-            "results": results, "AsOf": as_of, "version": "UK Oracle Screener V1.0"
+            "results": results, "AsOf": as_of, "version": "UK Oracle Screener V1.1 (Robust Fallback)"
         }
         if use_cache: self.cache_manager.save_to_cache(final)
         return final
