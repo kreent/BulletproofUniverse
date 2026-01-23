@@ -71,6 +71,10 @@ DEFAULT_UK_CONFIG = {
     "NEG_MOS_REQUIRE_FCFY_MIN": 0.045,
     "EXCLUDE_FINANCIALS": True,
     "EXCLUDE_REAL_ESTATE": False,
+    
+    # MOS Negative Guardrails (avoid expensive bond-proxies with fragile DCF)
+    "NEG_MOS_REQUIRE_TVW_MAX": 0.80,
+    "NEG_MOS_REQUIRE_FCFY_MIN": 0.045,
 }
 
 TERMINAL_G_BY_SECTOR = {
@@ -265,18 +269,18 @@ class UKAnalyzer:
         try:
             as_of = pd.Timestamp(as_of_date)
             t = yf.Ticker(ticker)
+            
+            # --- Price as-of with date tracking ---
             raw_px, px_dt = self.last_close_on_or_before(t, as_of, self.config["LOOKBACK_DAYS_PRICE"])
             if np.isnan(raw_px):
-                self.log(f"   ❌ {ticker}: No price data")
                 return None
 
             info = t.info
             ccy = info.get("currency", "GBP")
             price, ccy_norm, _ = self.normalize_uk_price(raw_px, ccy)
             
-            # Use property access to avoid fetching if empty
+            # --- Financials as-of ---
             if t.income_stmt.empty:
-                self.log(f"   ❌ {ticker}: No financials")
                 return None
                 
             inc = self.filter_fs_asof(t.income_stmt, as_of)
@@ -284,58 +288,69 @@ class UKAnalyzer:
             cf = self.filter_fs_asof(t.cashflow, as_of)
             
             if inc.empty or bal.empty or cf.empty:
-                self.log(f"   ❌ {ticker}: Filtered financials empty (As-Of: {as_of.date()})")
                 return None
 
             sector = info.get("sector", "N/A")
             if self.config["EXCLUDE_FINANCIALS"] and sector == "Financial Services":
                 return None
             
-            shares = self.get_shares_asof(inc)
+            bucket = sector_bucket(sector)
+            
+            # --- Shares with source tracking ---
+            shares, shares_source = self.get_shares_asof(inc, bal)
             if np.isnan(shares) or shares <= 0:
                 return None
             
+            # --- Market cap and FX ---
             mcap_local = price * shares
-            fx, _ = self.get_fx_to_usd_asof(ccy_norm, as_of)
-            mcap_usd = mcap_local * fx
+            fx, fx_dt = self.get_fx_to_usd_asof(ccy_norm, as_of)
+            mcap_usd = mcap_local * fx if not np.isnan(fx) else np.nan
             
-            # Filtro MCAP
-            if mcap_usd < self.config["MIN_MCAP_USD"]:
+            if np.isnan(mcap_usd) or mcap_usd < self.config["MIN_MCAP_USD"]:
                 return None
 
-            # Piotroski
+            # --- Piotroski ---
             pio, pio_cov = self.compute_piotroski_fscore(inc, bal, cf)
             if pio_cov < self.config["MIN_PIO_COVERAGE"]:
                 return None
             if pio < self.config["MIN_PIOTROSKI"]:
-                self.log(f"   ⚖️ {ticker}: Piotroski {pio}/9 (Min {self.config['MIN_PIOTROSKI']})")
                 return None
 
-            # ROIC
-            ebit = get_fuzzy_series(inc, ["EBIT"]); eq = get_fuzzy_series(bal, ["Stockholders Equity"])
-            debt = get_fuzzy_series(bal, ["Total Debt"]); cash = get_fuzzy_series(bal, ["Cash"])
-            c_ebit = safe_float(ebit.iloc[0]); c_eq = safe_float(eq.iloc[0])
+            # --- ROIC components ---
+            ebit = get_fuzzy_series(inc, ["EBIT", "Operating Income"])
+            ni = get_fuzzy_series(inc, ["Net Income"])
+            eq = get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
+            debt = get_fuzzy_series(bal, ["Total Debt"])
+            cash = get_fuzzy_series(bal, ["Cash", "Cash And Cash Equivalents"])
+            
+            c_ebit = safe_float(ebit.iloc[0]) if not ebit.empty else safe_float(ni.iloc[0])
+            c_eq = safe_float(eq.iloc[0])
             c_debt = safe_float(debt.iloc[0]) if not debt.empty else 0
             c_cash = safe_float(cash.iloc[0]) if not cash.empty else 0
             inv_cap = c_eq + c_debt - c_cash
             roic = (c_ebit * 0.79) / inv_cap if inv_cap > 0 else 0
             
             if roic < self.config["MIN_ROIC"]:
-                self.log(f"   ⚖️ {ticker}: ROIC {roic:.1%} (Min {self.config['MIN_ROIC']:.1%})")
                 return None
 
-            # DCF
+            # --- FCF components ---
             ocf_s = get_fuzzy_series(cf, ["Operating Cash Flow"])
             cpx_s = get_fuzzy_series(cf, ["Capital Expenditures"])
-            fcf = safe_float(ocf_s.iloc[0]) - abs(safe_float(cpx_s.iloc[0]))
+            ocf_val = safe_float(ocf_s.iloc[0]) if not ocf_s.empty else np.nan
+            cpx_val = abs(safe_float(cpx_s.iloc[0])) if not cpx_s.empty else 0
+            fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
             
-            bucket = sector_bucket(sector)
+            # --- DCF ---
             r = self.discount_rate_for_bucket(bucket)
-            g = min(roic * 0.5, 0.14); g = max(g, 0.03)
-            if bucket == "DEFENSIVE": g = min(g, 0.10)
+            g = min(roic * 0.5, 0.14)
+            g = max(g, 0.03)
+            if bucket == "DEFENSIVE":
+                g = min(g, 0.10)
             
             term_g = TERMINAL_G_BY_SECTOR.get(sector, 0.02)
-            intrinsic = 0; mos = -0.99; tvw = np.nan
+            intrinsic = 0
+            mos = -0.99
+            tvw = np.nan
             
             if fcf > 0 and r > term_g:
                 pv1 = sum([(fcf * (1+g)**i) / (1+r)**i for i in range(1, 6)])
@@ -347,19 +362,64 @@ class UKAnalyzer:
                     mos = (intrinsic - price) / intrinsic
                     tvw = pv_tv / ev
 
+            # --- Risk metrics ---
+            debt_to_mcap = (c_debt / mcap_local) if mcap_local > 0 else np.nan
+            fcf_yield = (fcf / mcap_local) if (mcap_local > 0 and not np.isnan(fcf)) else np.nan
+
+            # --- MOS Negative Guardrails (avoid expensive bond-proxies) ---
+            if mos < 0:
+                if (not np.isnan(tvw)) and (tvw > self.config["NEG_MOS_REQUIRE_TVW_MAX"]):
+                    return None
+                if (np.isnan(fcf_yield)) or (fcf_yield < self.config["NEG_MOS_REQUIRE_FCFY_MIN"]):
+                    return None
+
+            # --- Final filter ---
             if mos < self.config["MARGIN_OF_SAFETY_VIEW"] and pio < 7:
                 return None
 
+            # --- Comprehensive output ---
             return {
-                "Ticker": ticker, "AsOf": str(as_of.date()), "Sector": sector,
-                "Price_Local": round(price, 2), "Currency": ccy_norm,
-                "Intrinsic_Local": round(intrinsic, 2), "MOS": round(mos, 4),
-                "ROIC": round(roic, 4), "Piotroski": pio, "WACC": round(r, 4),
-                "MarketCap_USD": round(mcap_usd, 0), "FCF_Yield": round(fcf / mcap_local, 4) if mcap_local > 0 else 0,
-                "DCF_TV_Weight": round(tvw, 4)
+                "Ticker": ticker,
+                "AsOf": str(as_of.date()),
+                "PxDateUsed": str(px_dt.date()) if px_dt is not None else None,
+                
+                "Currency": ccy_norm,
+                "Price_Local": round(price, 2),
+                "Sector": sector,
+                "Bucket": bucket,
+                "Discount_Rate": round(r, 4),
+                
+                "ROIC": round(roic, 4),
+                "Piotroski": pio,
+                "Piotroski_Coverage": pio_cov,
+                
+                "Growth_Est": round(g, 4),
+                "Terminal_g": round(term_g, 4),
+                
+                "Intrinsic_Local": round(intrinsic, 2),
+                "MOS": round(mos, 4),
+                
+                "FCF_Local": round(fcf, 2) if not np.isnan(fcf) else None,
+                "OCF_Local": round(ocf_val, 2) if not np.isnan(ocf_val) else None,
+                "Capex_Local": round(cpx_val, 2),
+                "Debt_Local": round(c_debt, 2),
+                "Cash_Local": round(c_cash, 2),
+                "Equity_Local": round(c_eq, 2),
+                "InvestedCap_Local": round(inv_cap, 2),
+                
+                "Shares": round(shares, 0),
+                "Shares_Source": shares_source,
+                
+                "MarketCap_Local": round(mcap_local, 2),
+                "FX_to_USD": round(fx, 4) if not np.isnan(fx) else None,
+                "FX_DateUsed": str(fx_dt.date()) if fx_dt is not None else None,
+                "MarketCap_USD": round(mcap_usd, 0),
+                
+                "Debt_to_MCap": round(debt_to_mcap, 4) if not np.isnan(debt_to_mcap) else None,
+                "FCF_Yield": round(fcf_yield, 4) if not np.isnan(fcf_yield) else None,
+                "DCF_TV_Weight": round(tvw, 4) if not np.isnan(tvw) else None
             }
         except Exception as e:
-            # self.log(f"   ⚠️ Error en {ticker}: {e}")
             return None
 
     def run_analysis(self, as_of_date=None, use_cache=True):
@@ -379,7 +439,7 @@ class UKAnalyzer:
         results = sorted(results, key=lambda x: x["MOS"], reverse=True)
         final = {
             "total_analyzed": len(tickers), "candidates_count": len(results),
-            "results": results, "AsOf": as_of, "version": "UK Oracle Screener V1.1 (Robust Fallback)"
+            "results": results, "AsOf": as_of, "version": "UK Oracle Screener V1.2 (Enhanced Output)"
         }
         if use_cache: self.cache_manager.save_to_cache(final)
         return final
