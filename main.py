@@ -24,6 +24,7 @@ def log(msg):
 # Portfolio Analyzer (Core)
 try:
     from portfolio_analyzer import PortfolioAnalyzer, CacheManager
+    from uk_analyzer import UKAnalyzer
     PORTFOLIO_ANALYZER_AVAILABLE = True
     # Inicializar instancias globales
     cache_manager = CacheManager()
@@ -101,7 +102,8 @@ def home():
             "risk_free_rate": f"{CONFIG['RISK_FREE_RATE']*100}%"
         },
         "endpoints": {
-            "/analyze": "Run analysis (with 24h cache + auto post-processing)",
+            "/analyze": "Run US analysis (600 tickers, 24h cache)",
+            "/analyzeuk": "Run UK analysis (FTSE 100/250, supports ?as_of=YYYY-MM-DD)",
             "/refine": "GET - Portfolio Manager Review (adjust growth by sector)",
             "/follow": "POST - Portfolio Performance Tracker (analyze your portfolio)",
             "/post-process": "POST - Manual post-processing of results",
@@ -149,6 +151,33 @@ def analyze():
         log(f"❌ Error en análisis: {str(e)}")
         import traceback
         traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/analyzeuk')
+def analyze_uk():
+    """Endpoint de análisis para el mercado UK (FTSE 100 + FTSE 250)"""
+    try:
+        as_of = request.args.get('as_of', None)
+        use_cache = request.args.get('cache', 'true').lower() == 'true'
+        
+        log("\n" + "="*60)
+        log(f"🇬🇧 Petición de análisis UK recibida (As-Of: {as_of or 'Today'})")
+        log("="*60)
+        
+        uk_analyzer = UKAnalyzer()
+        results = uk_analyzer.run_analysis(as_of_date=as_of, use_cache=use_cache)
+        
+        response = app.response_class(
+            response=json.dumps(results, default=str, allow_nan=False)
+                     .replace('NaN', 'null')
+                     .replace('Infinity', 'null')
+                     .replace('-Infinity', 'null'),
+            status=200,
+            mimetype='application/json'
+        )
+        return response
+    except Exception as e:
+        log(f"❌ Error en análisis UK: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/cache-status')
