@@ -259,39 +259,68 @@ class UKAnalyzer:
 
     def compute_piotroski_fscore(self, inc, bal, cf):
         score = 0; covered = 0
-        ni = get_fuzzy_series(inc, ["Net Income"]); ocf = get_fuzzy_series(cf, ["Operating Cash Flow"])
-        assets = get_fuzzy_series(bal, ["Total Assets"]); ltd = get_fuzzy_series(bal, ["Total Debt"])
-        ca = get_fuzzy_series(bal, ["Current Assets"]); cl = get_fuzzy_series(bal, ["Current Liabilities"])
-        rev = get_fuzzy_series(inc, ["Total Revenue"]); gp = get_fuzzy_series(inc, ["Gross Profit"])
-        sh = get_fuzzy_series(bal, ["Ordinary Shares Number"])
+        ni = get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+        ocf = get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+        assets = get_fuzzy_series(bal, ["Total Assets"])
 
-        ni_t, ni_t1 = get_latest_and_prev(ni); ocf_t, ocf_t1 = get_latest_and_prev(ocf)
-        as_t, as_t1 = get_latest_and_prev(assets); ltd_t, ltd_t1 = get_latest_and_prev(ltd)
-        ca_t, ca_t1 = get_latest_and_prev(ca); cl_t, cl_t1 = get_latest_and_prev(cl)
-        rv_t, rv_t1 = get_latest_and_prev(rev); gp_t, gp_t1 = get_latest_and_prev(gp)
+        ltd = get_fuzzy_series(bal, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"])
+        if ltd.empty:
+            ltd = get_fuzzy_series(bal, ["Total Debt"])
+
+        ca = get_fuzzy_series(bal, ["Current Assets", "Total Current Assets"])
+        cl = get_fuzzy_series(bal, ["Current Liabilities", "Total Current Liabilities"])
+        rev = get_fuzzy_series(inc, ["Total Revenue", "Revenue"])
+        gp = get_fuzzy_series(inc, ["Gross Profit"])
+        sh = get_fuzzy_series(bal, ["Ordinary Shares Number", "Share Issued"])
+
+        ni_t, ni_t1 = get_latest_and_prev(ni)
+        ocf_t, ocf_t1 = get_latest_and_prev(ocf)
+        as_t, as_t1 = get_latest_and_prev(assets)
+        ltd_t, ltd_t1 = get_latest_and_prev(ltd)
+        ca_t, ca_t1 = get_latest_and_prev(ca)
+        cl_t, cl_t1 = get_latest_and_prev(cl)
+        rv_t, rv_t1 = get_latest_and_prev(rev)
+        gp_t, gp_t1 = get_latest_and_prev(gp)
         sh_t, sh_t1 = get_latest_and_prev(sh)
 
-        def ratio(a, b): return a / b if (b and not np.isnan(a) and not np.isnan(b)) else np.nan
+        def ratio(a, b): return a / b if (not np.isnan(a) and not np.isnan(b) and b != 0) else np.nan
 
         roa_t = ratio(ni_t, as_t); roa_t1 = ratio(ni_t1, as_t1)
         cr_t = ratio(ca_t, cl_t); cr_t1 = ratio(ca_t1, cl_t1)
         lv_t = ratio(ltd_t, as_t); lv_t1 = ratio(ltd_t1, as_t1)
         gm_t = ratio(gp_t, rv_t); gm_t1 = ratio(gp_t1, rv_t1)
-        at_t = ratio(rv_t, as_t); at_t1 = ratio(rv_t1, as_t1)
+        at_t = ratio(rv_t, as_t); at_t1 = ratio(at_t1 if 'at_t1' in locals() else np.nan, as_t1) # Fixed reference from Colab
+        at_t1 = ratio(rv_t1, as_t1) # Corrected assignment
 
-        checks = [
-            (roa_t, lambda x: x > 0), (ocf_t, lambda x: x > 0),
-            ((roa_t, roa_t1), lambda x: x[0] > x[1]), ((ocf_t, ni_t), lambda x: x[0] > x[1]),
-            ((lv_t, lv_t1), lambda x: x[0] < x[1]), ((cr_t, cr_t1), lambda x: x[0] > x[1]),
-            ((sh_t, sh_t1), lambda x: x[0] <= x[1]), ((gm_t, gm_t1), lambda x: x[0] > x[1]),
-            ((at_t, at_t1), lambda x: x[0] > x[1])
-        ]
-        for val, cond in checks:
-            if isinstance(val, tuple):
-                if not np.isnan(val[0]) and not np.isnan(val[1]):
-                    covered += 1; score += 1 if cond(val) else 0
-            elif not np.isnan(val):
-                covered += 1; score += 1 if cond(val) else 0
+        # Recalculate based on Colab logic exactly
+        if not np.isnan(roa_t):
+            covered += 1
+            score += 1 if roa_t > 0 else 0
+        if not np.isnan(ocf_t):
+            covered += 1
+            score += 1 if ocf_t > 0 else 0
+        if not np.isnan(roa_t) and not np.isnan(roa_t1):
+            covered += 1
+            score += 1 if roa_t > roa_t1 else 0
+        if not np.isnan(ocf_t) and not np.isnan(ni_t):
+            covered += 1
+            score += 1 if ocf_t > ni_t else 0
+        if not np.isnan(lv_t) and not np.isnan(lv_t1):
+            covered += 1
+            score += 1 if lv_t < lv_t1 else 0
+        if not np.isnan(cr_t) and not np.isnan(cr_t1):
+            covered += 1
+            score += 1 if cr_t > cr_t1 else 0
+        if not np.isnan(sh_t) and not np.isnan(sh_t1):
+            covered += 1
+            score += 1 if sh_t <= sh_t1 else 0
+        if not np.isnan(gm_t) and not np.isnan(gm_t1):
+            covered += 1
+            score += 1 if gm_t > gm_t1 else 0
+        if not np.isnan(at_t) and not np.isnan(at_t1):
+            covered += 1
+            score += 1 if at_t > at_t1 else 0
+        
         return score, covered
 
     def analyze_stock(self, ticker, as_of_date):
@@ -304,38 +333,106 @@ class UKAnalyzer:
             if np.isnan(raw_px):
                 return None
 
-            info = t.info
-            ccy = info.get("currency", "GBP")
-            price, ccy_norm, _ = self.normalize_uk_price(raw_px, ccy)
+            # --- currency (for GBp fix) ---
+            currency = None
+            try:
+                fi = t.fast_info
+                currency = getattr(fi, "currency", None)
+            except Exception:
+                currency = None
+            if not currency:
+                try:
+                    currency = t.info.get("currency", None)
+                except Exception:
+                    currency = None
+
+            price, ccy_norm, _ = self.normalize_uk_price(raw_px, currency or "N/A")
+            if np.isnan(price) or price <= 0:
+                return None
             
             # --- Financials as-of ---
-            if t.income_stmt.empty:
-                return None
-                
             inc = self.filter_fs_asof(t.income_stmt, as_of)
             bal = self.filter_fs_asof(t.balance_sheet, as_of)
             cf = self.filter_fs_asof(t.cashflow, as_of)
             
-            if inc.empty or bal.empty or cf.empty:
+            if inc is None or bal is None or cf is None or inc.empty or bal.empty or cf.empty:
                 return None
 
-            sector = info.get("sector", "N/A")
+            # sector early (for exclusions + bucket + r)
+            try:
+                sector = t.info.get("sector", "N/A")
+            except Exception:
+                sector = "N/A"
+
             if self.config["EXCLUDE_FINANCIALS"] and sector == "Financial Services":
+                return None
+            if self.config["EXCLUDE_REAL_ESTATE"] and sector == "Real Estate":
                 return None
             
             bucket = sector_bucket(sector)
             
-            # --- Shares with source tracking ---
-            shares, shares_source = self.get_shares_asof(inc, bal)
+            # --- shares as-of (avoid leakage) ---
+            shares_val, shares_source = self.get_shares_asof(inc, bal)
+            shares = shares_val
+            
+            if (np.isnan(shares) or shares <= 0) and self.config["ALLOW_SHARES_LEAKAGE_FALLBACK"]:
+                try:
+                    fast = t.fast_info
+                    shares = safe_float(getattr(fast, "shares", np.nan))
+                    shares_source = "fast_info(leakage)"
+                except Exception:
+                    shares = np.nan
+
             if np.isnan(shares) or shares <= 0:
                 return None
             
             # --- Market cap and FX ---
             mcap_local = price * shares
-            fx, fx_dt = self.get_fx_to_usd_asof(ccy_norm, as_of)
+            if np.isnan(mcap_local) or mcap_local <= 0:
+                return None
+
+            fx, fx_dt = self.get_fx_to_usd_asof(ccy_norm if ccy_norm != "N/A" else "GBP", as_of)
             mcap_usd = mcap_local * fx if not np.isnan(fx) else np.nan
             
             if np.isnan(mcap_usd) or mcap_usd < self.config["MIN_MCAP_USD"]:
+                return None
+
+            # --- fuzzy pulls ---
+            ni_s = get_fuzzy_series(inc, ["Net Income", "NetIncome"])
+            ebit_s = get_fuzzy_series(inc, ["EBIT", "Operating Income"])
+            ocf_s = get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+            capex_s = get_fuzzy_series(cf, [
+                "Capital Expenditures",
+                "Purchase of PPE",
+                "Investments in Property Plant and Equipment"
+            ])
+            equity_s = get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
+            debt_s = get_fuzzy_series(bal, [
+                "Total Debt",
+                "Long Term Debt",
+                "Long Term Debt And Capital Lease Obligation",
+                "Short Long Term Debt",
+                "Short Term Debt"
+            ])
+            cash_s = get_fuzzy_series(bal, [
+                "Cash",
+                "Cash And Cash Equivalents",
+                "Cash Cash Equivalents And Short Term Investments"
+            ])
+
+            if ni_s.empty or ocf_s.empty or equity_s.empty:
+                return None
+
+            # --- as-of values ---
+            c_ebit = safe_float(ebit_s.iloc[0]) if (not ebit_s.empty and not pd.isna(ebit_s.iloc[0])) else safe_float(ni_s.iloc[0])
+            c_eq = safe_float(equity_s.iloc[0]) if not pd.isna(equity_s.iloc[0]) else 0.0
+            c_debt = safe_float(debt_s.iloc[0]) if (not debt_s.empty and not pd.isna(debt_s.iloc[0])) else 0.0
+            c_cash = safe_float(cash_s.iloc[0]) if (not cash_s.empty and not pd.isna(cash_s.iloc[0])) else 0.0
+            
+            inv_cap = c_eq + c_debt - c_cash
+            roic = (c_ebit * 0.79) / inv_cap if inv_cap > 0 else 0.0
+            
+            if roic < self.config["MIN_ROIC"]:
                 return None
 
             # --- Piotroski ---
@@ -345,32 +442,9 @@ class UKAnalyzer:
             if pio < self.config["MIN_PIOTROSKI"]:
                 return None
 
-            # --- ROIC components ---
-            ebit = get_fuzzy_series(inc, ["EBIT", "Operating Income"])
-            ni = get_fuzzy_series(inc, ["Net Income"])
-            eq = get_fuzzy_series(bal, ["Stockholders Equity", "Total Equity"])
-            debt = get_fuzzy_series(bal, ["Total Debt"])
-            cash = get_fuzzy_series(bal, ["Cash", "Cash And Cash Equivalents"])
-            
-            c_ebit = safe_float(ebit.iloc[0]) if not ebit.empty else safe_float(ni.iloc[0])
-            c_eq = safe_float(eq.iloc[0])
-            c_debt = safe_float(debt.iloc[0]) if not debt.empty else 0
-            c_cash = safe_float(cash.iloc[0]) if not cash.empty else 0
-            inv_cap = c_eq + c_debt - c_cash
-            roic = (c_ebit * 0.79) / inv_cap if inv_cap > 0 else 0
-            
-            if roic < self.config["MIN_ROIC"]:
-                return None
-
-            # --- FCF components ---
-            ocf_s = get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
-            cpx_s = get_fuzzy_series(cf, [
-                "Capital Expenditures",
-                "Purchase of PPE",
-                "Investments in Property Plant and Equipment"
-            ])
-            ocf_val = safe_float(ocf_s.iloc[0]) if not ocf_s.empty else np.nan
-            cpx_val = abs(safe_float(cpx_s.iloc[0])) if (not cpx_s.empty and not pd.isna(cpx_s.iloc[0])) else 0.0
+            # --- FCF ---
+            ocf_val = safe_float(ocf_s.iloc[0]) if not pd.isna(ocf_s.iloc[0]) else np.nan
+            cpx_val = abs(safe_float(capex_s.iloc[0])) if (not capex_s.empty and not pd.isna(capex_s.iloc[0])) else 0.0
             fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
             
             # --- DCF ---
@@ -381,20 +455,24 @@ class UKAnalyzer:
             growth_proxy = max(growth_proxy, 0.03)
             growth_proxy = cap_growth_proxy_by_bucket(growth_proxy, bucket)
             
-            term_g = TERMINAL_G_BY_SECTOR.get(sector, 0.02)
-            intrinsic = 0
+            term_g = TERMINAL_G_BY_SECTOR.get(sector, TERMINAL_G_BY_SECTOR["N/A"])
+            intrinsic = 0.0
             mos = -0.99
             tvw = np.nan
             
-            if fcf > 0 and r > term_g:
+            if (not np.isnan(fcf)) and fcf > 0:
+                if r <= term_g:
+                    return None
+
                 pv1 = sum([(fcf * (1+growth_proxy)**i) / (1+r)**i for i in range(1, 6)])
-                tv = (fcf * (1+growth_proxy)**5 * (1+term_g)) / (r - term_g)
+                terminal_fcf = fcf * (1+growth_proxy)**5
+                tv = (terminal_fcf * (1+term_g)) / (r - term_g)
                 pv_tv = tv / (1+r)**5
                 ev = pv1 + pv_tv
                 intrinsic = (ev + c_cash - c_debt) / shares
                 if intrinsic > 0:
                     mos = (intrinsic - price) / intrinsic
-                    tvw = pv_tv / ev
+                    tvw = pv_tv / ev if ev > 0 else np.nan
 
             # --- Risk metrics ---
             debt_to_mcap = (c_debt / mcap_local) if mcap_local > 0 else np.nan
