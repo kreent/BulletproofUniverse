@@ -7,12 +7,10 @@ Soporte para GBp (pence), universos FTSE 100/250 y análisis histórico.
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import requests
 import sys
 import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import io
 from portfolio_analyzer import CacheManager
 
 def safe_float(x):
@@ -195,46 +193,60 @@ class UKAnalyzer:
         return base
 
     def get_uk_universe_ftse(self):
-        self.log("🇬🇧 Generando Universo UK (Wikipedia)...")
         tickers = []
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        
-        def extract(url):
-            try: 
-                r = requests.get(url, headers=headers, timeout=15)
-                if r.status_code != 200:
-                    self.log(f"   ⚠️ Wikipedia returned {r.status_code} for {url}")
-                    return []
-                # Use io.StringIO to avoid future warnings and handle the HTML string
-                tbls = pd.read_html(io.StringIO(r.text))
-                for df in tbls:
-                    for col in ["Ticker", "EPIC"]:
-                        if col in df.columns: return df[col].astype(str).tolist()
+        self.log("🇬🇧 Generando Universo UK: FTSE 100 + FTSE 250...")
+
+        def extract_wiki_tickers(url: str):
+            out = []
+            try:
+                tables = pd.read_html(url)
+                for df in tables:
+                    if "Ticker" in df.columns:
+                        col = df["Ticker"].astype(str).str.strip()
+                        col = col[col.notna() & (col != "nan") & (col != "")]
+                        out = col.tolist()
+                        break
             except Exception as e:
                 self.log(f"   ⚠️ Error extracting from {url}: {e}")
                 return []
-            return []
-        
-        tickers.extend(extract("https://en.wikipedia.org/wiki/FTSE_100_Index"))
-        tickers.extend(extract("https://en.wikipedia.org/wiki/FTSE_250_Index"))
-        
-        raw = list(dict.fromkeys([t.strip().replace(".", "-") + ".L" for t in tickers if t and t != "nan"]))
-        self.log(f"   ✅ Extraídos {len(raw)} tickers de Wikipedia.")
-        
-        if len(raw) < 50: 
-            self.log("   ⚠️ Fallo extracción masiva de Wikipedia. Usando fallback robusto...")
-            # Lista ampliada de Blue Chips del Reino Unido (FTSE 100)
-            robust_fallback = [
-                "AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L", "ULVR.L", 
-                "BATS.L", "REL.L", "GLEN.L", "LLOY.L", "BARC.L", "VOD.L", "AHT.L",
-                "CPG.L", "SSE.L", "NWG.L", "RR.L", "BA.L", "TSCO.L", "NG.L", "PRU.L",
-                "LGEN.L", "AV.L", "ADM.L", "SN.L", "INF.L", "WPP.L", "EXPN.L", "SGE.L",
-                "ENT.L", "FLTR.L", "JD.L", "MNG.L", "OCDO.L", "PHNX.L", "PSN.L", "RMV.L",
-                "SMDS.L", "SMIN.L", "SPX.L", "STJ.L", "TW.L", "VTY.L", "WTB.L"
-            ]
-            raw.extend(robust_fallback)
-            
-        return list(dict.fromkeys(raw))[:700]
+            return out
+
+        try:
+            ftse100 = extract_wiki_tickers("https://en.wikipedia.org/wiki/FTSE_100_Index")
+            self.log(f"   -> FTSE 100 cargado ({len(ftse100)})")
+        except Exception:
+            ftse100 = []
+            self.log("   ⚠️ Fallo FTSE 100 (Wikipedia).")
+
+        try:
+            ftse250 = extract_wiki_tickers("https://en.wikipedia.org/wiki/FTSE_250_Index")
+            self.log(f"   -> FTSE 250 cargado ({len(ftse250)})")
+        except Exception:
+            ftse250 = []
+            self.log("   ⚠️ Fallo FTSE 250 (Wikipedia).")
+
+        raw = list(dict.fromkeys(ftse100 + ftse250))
+
+        BACKUP_UK = [
+            "AZN","SHEL","HSBA","ULVR","BP","BATS","GSK","RIO","GLEN","DGE",
+            "REL","NG","LSEG","BARC","PRU","VOD","AAL","STAN","EXPN","III",
+            "WTB","SMIN","ABDN","HLMA","IMB","SSE","CNA","LAND","BNZL","CPG"
+        ]
+        if len(raw) < 80:
+            self.log("⚠️ Universo muy pequeño. Usando respaldo UK adicional.")
+            raw = list(dict.fromkeys(raw + BACKUP_UK))
+
+        tickers = []
+        for t in raw:
+            t = str(t).strip()
+            if not t:
+                continue
+            t = t.rstrip(".")
+            t = t.replace(".", "-")
+            tickers.append(f"{t}.L")
+
+        tickers = list(dict.fromkeys(tickers))
+        return tickers[:700]
 
     def compute_piotroski_fscore(self, inc, bal, cf):
         score = 0; covered = 0
@@ -397,40 +409,40 @@ class UKAnalyzer:
                 "PxDateUsed": str(px_dt.date()) if px_dt is not None else None,
                 
                 "Currency": ccy_norm,
-                "Price_Local": round(price, 2),
+                "Price_Local": price,
                 "Sector": sector,
                 "Bucket": bucket,
-                "Discount_Rate": round(r, 4),
+                "Discount_Rate": r,
                 
-                "ROIC": round(roic, 4),
+                "ROIC": roic,
                 "Piotroski": pio,
                 "Piotroski_Coverage": pio_cov,
                 
-                "Growth_Est": round(growth_proxy, 4),
-                "Terminal_g": round(term_g, 4),
+                "Growth_Est": growth_proxy,
+                "Terminal_g": term_g,
                 
-                "Intrinsic_Local": round(intrinsic, 2),
-                "MOS": round(mos, 4),
+                "Intrinsic_Local": intrinsic,
+                "MOS": mos,
                 
-                "FCF_Local": round(fcf, 2) if not np.isnan(fcf) else None,
-                "OCF_Local": round(ocf_val, 2) if not np.isnan(ocf_val) else None,
-                "Capex_Local": round(cpx_val, 2),
-                "Debt_Local": round(c_debt, 2),
-                "Cash_Local": round(c_cash, 2),
-                "Equity_Local": round(c_eq, 2),
-                "InvestedCap_Local": round(inv_cap, 2),
+                "FCF_Local": fcf,
+                "OCF_Local": ocf_val,
+                "Capex_Local": cpx_val,
+                "Debt_Local": c_debt,
+                "Cash_Local": c_cash,
+                "Equity_Local": c_eq,
+                "InvestedCap_Local": inv_cap,
                 
-                "Shares": round(shares, 0),
+                "Shares": shares,
                 "Shares_Source": shares_source,
                 
-                "MarketCap_Local": round(mcap_local, 2),
-                "FX_to_USD": round(fx, 4) if not np.isnan(fx) else None,
+                "MarketCap_Local": mcap_local,
+                "FX_to_USD": fx if not np.isnan(fx) else None,
                 "FX_DateUsed": str(fx_dt.date()) if fx_dt is not None else None,
-                "MarketCap_USD": round(mcap_usd, 0),
+                "MarketCap_USD": mcap_usd,
                 
-                "Debt_to_MCap": round(debt_to_mcap, 4) if not np.isnan(debt_to_mcap) else None,
-                "FCF_Yield": round(fcf_yield, 4) if not np.isnan(fcf_yield) else None,
-                "DCF_TV_Weight": round(tvw, 4) if not np.isnan(tvw) else None
+                "Debt_to_MCap": debt_to_mcap if not np.isnan(debt_to_mcap) else None,
+                "FCF_Yield": fcf_yield if not np.isnan(fcf_yield) else None,
+                "DCF_TV_Weight": tvw if not np.isnan(tvw) else None
             }
         except Exception as e:
             return None
