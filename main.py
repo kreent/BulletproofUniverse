@@ -50,6 +50,15 @@ except Exception as e:
     UK_ANALYZER_AVAILABLE = False
     print(f"⚠️  UK Analyzer no disponible: {e}")
 
+# China Analyzer
+try:
+    from china_analyzer import ChinaAnalyzer
+    CHINA_ANALYZER_AVAILABLE = True
+    print("✓ China Analyzer cargado")
+except Exception as e:
+    CHINA_ANALYZER_AVAILABLE = False
+    print(f"⚠️  China Analyzer no disponible: {e}")
+
 # Post-processor
 try:
     from post_processor import ResultsPostProcessor
@@ -113,7 +122,9 @@ def home():
         "endpoints": {
             "/analyze": "Run US analysis (600 tickers, 24h cache)",
             "/analyzeuk": "Run UK analysis (FTSE 100/250, supports ?as_of=YYYY-MM-DD)",
+            "/china_analizer": "Run China analysis (Elite + Hang Seng components)",
             "/refine": "GET - Portfolio Manager Review (adjust growth by sector)",
+            "/refineruk": "GET - Portfolio Manager Review (UK)",
             "/follow": "POST - Portfolio Performance Tracker (analyze your portfolio)",
             "/post-process": "POST - Manual post-processing of results",
             "/cache-status": "Check cache status",
@@ -194,6 +205,37 @@ def analyze_uk():
         log(f"❌ Error en análisis UK: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/china_analizer')
+def analyze_china():
+    """Endpoint de análisis para el mercado China (Elite + Hang Seng)"""
+    if not CHINA_ANALYZER_AVAILABLE:
+        return jsonify({
+            "error": "China Analyzer not available"
+        }), 503
+        
+    try:
+        use_cache = request.args.get('cache', 'true').lower() == 'true'
+        
+        log("\n" + "="*60)
+        log(f"🐉 Petición de análisis China recibida")
+        log("="*60)
+        
+        china_analyzer = ChinaAnalyzer()
+        results = china_analyzer.run_analysis(use_cache=use_cache)
+        
+        response = app.response_class(
+            response=json.dumps(results, default=str, allow_nan=False)
+                     .replace('NaN', 'null')
+                     .replace('Infinity', 'null')
+                     .replace('-Infinity', 'null'),
+            status=200,
+            mimetype='application/json'
+        )
+        return response
+    except Exception as e:
+        log(f"❌ Error en análisis China: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/cache-status')
 def cache_status():
     """Verifica el estado del caché"""
@@ -245,11 +287,13 @@ def health():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "portfolio_analyzer_available": PORTFOLIO_ANALYZER_AVAILABLE,
+        "uk_analyzer_available": UK_ANALYZER_AVAILABLE,
+        "china_analyzer_available": CHINA_ANALYZER_AVAILABLE,
         "cache_available": GCS_AVAILABLE,
         "post_processor_available": POST_PROCESSOR_AVAILABLE,
         "portfolio_refiner_available": PORTFOLIO_REFINER_AVAILABLE,
         "portfolio_tracker_available": PORTFOLIO_TRACKER_AVAILABLE,
-        "version": "8.0 - DCF 2-Stage + Quality + Portfolio Manager + Tracker"
+        "version": "8.1 - China Support Added"
     })
 
 @app.route('/post-process', methods=['POST'])
