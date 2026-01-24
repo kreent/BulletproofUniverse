@@ -74,7 +74,7 @@ DEFAULT_UK_CONFIG = {
     "MIN_PIO_COVERAGE": 7,
     "DISCOUNT_RATE_BASE": 0.09,
     "MARGIN_OF_SAFETY_VIEW": -0.20,
-    "AS_OF_DATE": datetime.now().strftime("%Y-%m-%d"),
+    "AS_OF_DATE": "2025-02-01",  # Fixed date to match reference script
     "LOOKBACK_DAYS_PRICE": 12,
     "MIN_MCAP_USD": 5_000_000_000,  # 5B to match reference script
     "FX_LOOKBACK_DAYS": 20,
