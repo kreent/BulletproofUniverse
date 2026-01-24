@@ -61,6 +61,7 @@ except ImportError:
 # Portfolio Refiner
 try:
     from portfolio_refiner import PortfolioRefiner
+    from uk_refiner import UKPortfolioRefiner
     PORTFOLIO_REFINER_AVAILABLE = True
 except ImportError:
     PORTFOLIO_REFINER_AVAILABLE = False
@@ -463,6 +464,57 @@ def refine_endpoint():
         
     except Exception as e:
         log(f"❌ Error en refinamiento: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/refineruk', methods=['GET'])
+def refiner_uk_endpoint():
+    """
+    Endpoint para Portfolio Manager Review (UK)
+    Toma los datos del último análisis UK (caché) y los refina con lógica calibrada para UK
+    """
+    if not PORTFOLIO_REFINER_AVAILABLE:
+        return jsonify({"error": "Portfolio Refiner not available"}), 503
+    
+    try:
+        log("\n" + "="*60)
+        log("🧠 Portfolio Manager Review UK")
+        log("="*60)
+        
+        # 1. Obtener caché de UK específicamente
+        from portfolio_analyzer import CacheManager
+        uk_cache_manager = CacheManager(cache_file_name="uk_screener_results.json")
+        log("📂 Buscando datos UK en caché...")
+        cached_data = uk_cache_manager.get_full_cached_data()
+        
+        if not cached_data:
+            log("❌ No hay resultados UK para refinar")
+            return jsonify({"error": "No UK analysis results available. Run /analyzeuk first."}), 404
+        
+        log("✅ Datos UK encontrados en caché")
+        
+        # 2. Refinar con lógica calibrada para UK
+        return_all = request.args.get('all', 'false').lower() == 'true'
+        refiner = UKPortfolioRefiner(cached_data, return_all=return_all)
+        refined_data = refiner.refine_all()
+        
+        if refined_data is None:
+            log("❌ Error en refinamiento UK")
+            return jsonify({"error": "Failed to refine UK data"}), 500
+        
+        log("✅ Refinamiento UK completado exitosamente")
+        log("="*60)
+        
+        return jsonify({
+            "status": "success",
+            "refined_data": refined_data,
+            "refined_at": datetime.now().isoformat(),
+            "original_as_of": cached_data.get('AsOf')
+        })
+        
+    except Exception as e:
+        log(f"❌ Error en refinamiento UK: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
