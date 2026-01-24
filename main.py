@@ -240,45 +240,67 @@ def analyze_china():
 
 @app.route('/cache-status')
 def cache_status():
-    """Verifica el estado del caché"""
-    if not PORTFOLIO_ANALYZER_AVAILABLE or cache_manager is None:
-        return jsonify({
-            "cache_enabled": False,
-            "message": "Portfolio Analyzer not available"
-        })
+    """Verifica el estado del caché para todos los mercados"""
+    results = {}
     
-    try:
-        status = cache_manager.get_cache_status()
-        return jsonify(status)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # US Cache
+    if PORTFOLIO_ANALYZER_AVAILABLE and cache_manager is not None:
+        try:
+            results["us_market"] = cache_manager.get_cache_status()
+        except Exception as e:
+            results["us_market"] = {"error": str(e)}
+            
+    # UK Cache
+    if UK_ANALYZER_AVAILABLE:
+        try:
+            from portfolio_analyzer import CacheManager
+            uk_cache_manager = CacheManager(cache_file_name="uk_screener_results.json")
+            status = uk_cache_manager.get_cache_status()
+            results["uk_market"] = status
+        except Exception as e:
+            results["uk_market"] = {"error": str(e)}
+
+    # China Cache
+    if CHINA_ANALYZER_AVAILABLE:
+        try:
+            from portfolio_analyzer import CacheManager
+            china_cache_manager = CacheManager(cache_file_name="china_screener_results.json")
+            status = china_cache_manager.get_cache_status()
+            results["china_market"] = status
+        except Exception as e:
+            results["china_market"] = {"error": str(e)}
+            
+    return jsonify(results)
 
 @app.route('/clear-cache')
 def clear_cache():
-    """Limpia el caché manualmente (US y UK)"""
+    """Limpia el caché manualmente (US, UK y China)"""
     results = {}
     
     # Clear US cache
     if PORTFOLIO_ANALYZER_AVAILABLE and cache_manager is not None:
         try:
-            us_result = cache_manager.clear_cache()
-            results["us_cache"] = us_result
+            results["us_cache"] = cache_manager.clear_cache()
         except Exception as e:
             results["us_cache"] = {"error": str(e)}
-    else:
-        results["us_cache"] = {"status": "Portfolio Analyzer not available"}
     
     # Clear UK cache
     if UK_ANALYZER_AVAILABLE:
         try:
             from portfolio_analyzer import CacheManager
             uk_cache_manager = CacheManager(cache_file_name="uk_screener_results.json")
-            uk_result = uk_cache_manager.clear_cache()
-            results["uk_cache"] = uk_result
+            results["uk_cache"] = uk_cache_manager.clear_cache()
         except Exception as e:
             results["uk_cache"] = {"error": str(e)}
-    else:
-        results["uk_cache"] = {"status": "UK Analyzer not available"}
+
+    # Clear China cache
+    if CHINA_ANALYZER_AVAILABLE:
+        try:
+            from portfolio_analyzer import CacheManager
+            china_cache_manager = CacheManager(cache_file_name="china_screener_results.json")
+            results["china_cache"] = china_cache_manager.clear_cache()
+        except Exception as e:
+            results["china_cache"] = {"error": str(e)}
     
     return jsonify(results)
 
