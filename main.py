@@ -53,6 +53,7 @@ except Exception as e:
 # China Analyzer
 try:
     from china_analyzer import ChinaAnalyzer
+    from china_refiner import ChinaPortfolioRefiner
     CHINA_ANALYZER_AVAILABLE = True
     print("✓ China Analyzer cargado")
 except Exception as e:
@@ -125,6 +126,7 @@ def home():
             "/china_analizer": "Run China analysis (Elite + Hang Seng components)",
             "/refine": "GET - Portfolio Manager Review (adjust growth by sector)",
             "/refineruk": "GET - Portfolio Manager Review (UK)",
+            "/china_refiner": "GET - Portfolio Manager Review (China)",
             "/follow": "POST - Portfolio Performance Tracker (analyze your portfolio)",
             "/post-process": "POST - Manual post-processing of results",
             "/cache-status": "Check cache status",
@@ -559,6 +561,56 @@ def refiner_uk_endpoint():
         
     except Exception as e:
         log(f"❌ Error en refinamiento UK: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/china_refiner', methods=['GET'])
+def refiner_china_endpoint():
+    """
+    Endpoint para Portfolio Manager Review (China)
+    Toma los datos del último análisis China (caché) y los refina con lógica calibrada para ese mercado.
+    """
+    if not PORTFOLIO_REFINER_AVAILABLE:
+        return jsonify({"error": "Portfolio Refiner not available"}), 503
+    
+    try:
+        log("\n" + "="*60)
+        log("🧠 Portfolio Manager Review China")
+        log("="*60)
+        
+        # 1. Obtener caché de China
+        from portfolio_analyzer import CacheManager
+        china_cache_manager = CacheManager(cache_file_name="china_screener_results.json")
+        log("📂 Buscando datos China en caché...")
+        cached_data = china_cache_manager.get_full_cached_data()
+        
+        if not cached_data:
+            log("❌ No hay resultados China para refinar")
+            return jsonify({"error": "No China analysis results available. Run /china_analizer first."}), 404
+        
+        log("✅ Datos China encontrados en caché")
+        
+        # 2. Refinar
+        return_all = request.args.get('all', 'false').lower() == 'true'
+        refiner = ChinaPortfolioRefiner(cached_data, return_all=return_all)
+        refined_data = refiner.refine_all()
+        
+        if refined_data is None:
+            log("❌ Error en refinamiento China")
+            return jsonify({"error": "Failed to refine China data"}), 500
+        
+        log("✅ Refinamiento China completado exitosamente")
+        log("="*60)
+        
+        return jsonify({
+            "status": "success",
+            "refined_data": refined_data,
+            "refined_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        log(f"❌ Error en refinamiento China: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
