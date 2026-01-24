@@ -198,34 +198,43 @@ class UKAnalyzer:
 
         def extract_wiki_tickers(url: str):
             out = []
-            try:
-                tables = pd.read_html(url)
-                for df in tables:
-                    if "Ticker" in df.columns:
-                        col = df["Ticker"].astype(str).str.strip()
-                        col = col[col.notna() & (col != "nan") & (col != "")]
-                        out = col.tolist()
-                        break
-            except Exception as e:
-                self.log(f"   ⚠️ Error extracting from {url}: {e}")
-                return []
-            return out
+            parsers = ['lxml', 'html5lib', 'html.parser']
+            
+            for parser in parsers:
+                try:
+                    self.log(f"      Trying parser: {parser}")
+                    tables = pd.read_html(url, flavor=parser)
+                    for df in tables:
+                        if "Ticker" in df.columns:
+                            col = df["Ticker"].astype(str).str.strip()
+                            col = col[col.notna() & (col != "nan") & (col != "")]
+                            out = col.tolist()
+                            self.log(f"      ✅ Success with {parser}: {len(out)} tickers")
+                            return out
+                    self.log(f"      No 'Ticker' column found with {parser}")
+                except Exception as e:
+                    self.log(f"      {parser} failed: {type(e).__name__}: {str(e)[:100]}")
+                    continue
+            
+            self.log(f"   ❌ All parsers failed for {url}")
+            return []
 
         try:
             ftse100 = extract_wiki_tickers("https://en.wikipedia.org/wiki/FTSE_100_Index")
             self.log(f"   -> FTSE 100 cargado ({len(ftse100)})")
-        except Exception:
+        except Exception as e:
             ftse100 = []
-            self.log("   ⚠️ Fallo FTSE 100 (Wikipedia).")
+            self.log(f"   ⚠️ Fallo FTSE 100: {type(e).__name__}: {str(e)[:200]}")
 
         try:
             ftse250 = extract_wiki_tickers("https://en.wikipedia.org/wiki/FTSE_250_Index")
             self.log(f"   -> FTSE 250 cargado ({len(ftse250)})")
-        except Exception:
+        except Exception as e:
             ftse250 = []
-            self.log("   ⚠️ Fallo FTSE 250 (Wikipedia).")
+            self.log(f"   ⚠️ Fallo FTSE 250: {type(e).__name__}: {str(e)[:200]}")
 
         raw = list(dict.fromkeys(ftse100 + ftse250))
+        self.log(f"   📊 Total únicos extraídos: {len(raw)}")
 
         BACKUP_UK = [
             "AZN","SHEL","HSBA","ULVR","BP","BATS","GSK","RIO","GLEN","DGE",
