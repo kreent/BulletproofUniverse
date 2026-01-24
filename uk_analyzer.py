@@ -52,6 +52,18 @@ def sector_bucket(sector: str) -> str:
     if sector in growth: return "GROWTH"
     return "OTHER"
 
+def cap_growth_proxy_by_bucket(g: float, bucket: str) -> float:
+    """
+    Cap growth proxy by bucket to avoid implausible defensives in UK.
+    """
+    if np.isnan(g):
+        return g
+    if bucket == "DEFENSIVE":
+        return min(g, 0.10)
+    if bucket == "CYCLICAL":
+        return min(g, 0.12)
+    return g
+
 # ==========================================
 # ⚙️ CONFIG (UK calibrated)
 # ==========================================
@@ -64,17 +76,13 @@ DEFAULT_UK_CONFIG = {
     "MARGIN_OF_SAFETY_VIEW": -0.20,
     "AS_OF_DATE": datetime.now().strftime("%Y-%m-%d"),
     "LOOKBACK_DAYS_PRICE": 12,
-    "MIN_MCAP_USD": 2_000_000_000, # Bajado a 2B para ser consistente con US mid-cap
+    "MIN_MCAP_USD": 5_000_000_000,  # 5B to match reference script
     "FX_LOOKBACK_DAYS": 20,
     "ALLOW_SHARES_LEAKAGE_FALLBACK": False,
     "NEG_MOS_REQUIRE_TVW_MAX": 0.80,
     "NEG_MOS_REQUIRE_FCFY_MIN": 0.045,
     "EXCLUDE_FINANCIALS": True,
     "EXCLUDE_REAL_ESTATE": False,
-    
-    # MOS Negative Guardrails (avoid expensive bond-proxies with fragile DCF)
-    "NEG_MOS_REQUIRE_TVW_MAX": 0.80,
-    "NEG_MOS_REQUIRE_FCFY_MIN": 0.045,
 }
 
 TERMINAL_G_BY_SECTOR = {
@@ -342,10 +350,11 @@ class UKAnalyzer:
             
             # --- DCF ---
             r = self.discount_rate_for_bucket(bucket)
-            g = min(roic * 0.5, 0.14)
-            g = max(g, 0.03)
-            if bucket == "DEFENSIVE":
-                g = min(g, 0.10)
+            
+            # Growth proxy with bucket-specific caps
+            growth_proxy = min(roic * 0.5, 0.14)
+            growth_proxy = max(growth_proxy, 0.03)
+            growth_proxy = cap_growth_proxy_by_bucket(growth_proxy, bucket)
             
             term_g = TERMINAL_G_BY_SECTOR.get(sector, 0.02)
             intrinsic = 0
@@ -353,8 +362,8 @@ class UKAnalyzer:
             tvw = np.nan
             
             if fcf > 0 and r > term_g:
-                pv1 = sum([(fcf * (1+g)**i) / (1+r)**i for i in range(1, 6)])
-                tv = (fcf * (1+g)**5 * (1+term_g)) / (r - term_g)
+                pv1 = sum([(fcf * (1+growth_proxy)**i) / (1+r)**i for i in range(1, 6)])
+                tv = (fcf * (1+growth_proxy)**5 * (1+term_g)) / (r - term_g)
                 pv_tv = tv / (1+r)**5
                 ev = pv1 + pv_tv
                 intrinsic = (ev + c_cash - c_debt) / shares
@@ -393,7 +402,7 @@ class UKAnalyzer:
                 "Piotroski": pio,
                 "Piotroski_Coverage": pio_cov,
                 
-                "Growth_Est": round(g, 4),
+                "Growth_Est": round(growth_proxy, 4),
                 "Terminal_g": round(term_g, 4),
                 
                 "Intrinsic_Local": round(intrinsic, 2),
