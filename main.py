@@ -210,18 +210,32 @@ def cache_status():
 
 @app.route('/clear-cache')
 def clear_cache():
-    """Limpia el caché manualmente"""
-    if not PORTFOLIO_ANALYZER_AVAILABLE or cache_manager is None:
-        return jsonify({"status": "Portfolio Analyzer not available"}), 503
+    """Limpia el caché manualmente (US y UK)"""
+    results = {}
     
-    try:
-        result = cache_manager.clear_cache()
-        if "error" in result:
-            return jsonify(result), 500
-        return jsonify(result)
-    except Exception as e:
-        log(f"❌ Error limpiando caché: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+    # Clear US cache
+    if PORTFOLIO_ANALYZER_AVAILABLE and cache_manager is not None:
+        try:
+            us_result = cache_manager.clear_cache()
+            results["us_cache"] = us_result
+        except Exception as e:
+            results["us_cache"] = {"error": str(e)}
+    else:
+        results["us_cache"] = {"status": "Portfolio Analyzer not available"}
+    
+    # Clear UK cache
+    if UK_ANALYZER_AVAILABLE:
+        try:
+            from portfolio_analyzer import CacheManager
+            uk_cache_manager = CacheManager(cache_file_name="uk_screener_results.json")
+            uk_result = uk_cache_manager.clear_cache()
+            results["uk_cache"] = uk_result
+        except Exception as e:
+            results["uk_cache"] = {"error": str(e)}
+    else:
+        results["uk_cache"] = {"status": "UK Analyzer not available"}
+    
+    return jsonify(results)
 
 @app.route('/health')
 def health():
