@@ -342,10 +342,14 @@ class UKAnalyzer:
                 return None
 
             # --- FCF components ---
-            ocf_s = get_fuzzy_series(cf, ["Operating Cash Flow"])
-            cpx_s = get_fuzzy_series(cf, ["Capital Expenditures"])
+            ocf_s = get_fuzzy_series(cf, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+            cpx_s = get_fuzzy_series(cf, [
+                "Capital Expenditures",
+                "Purchase of PPE",
+                "Investments in Property Plant and Equipment"
+            ])
             ocf_val = safe_float(ocf_s.iloc[0]) if not ocf_s.empty else np.nan
-            cpx_val = abs(safe_float(cpx_s.iloc[0])) if not cpx_s.empty else 0
+            cpx_val = abs(safe_float(cpx_s.iloc[0])) if (not cpx_s.empty and not pd.isna(cpx_s.iloc[0])) else 0.0
             fcf = ocf_val - cpx_val if not np.isnan(ocf_val) else np.nan
             
             # --- DCF ---
